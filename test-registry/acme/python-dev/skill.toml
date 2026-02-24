@@ -1,0 +1,23 @@
+[skill]
+name = "python-dev"
+owner = "acme"
+version = "2026.01.15"
+description = "Python development standards with type hints and modern tooling"
+trigger = "Use when writing or reviewing Python code"
+license = "Apache-2.0"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["development", "python"]
+tags = ["python", "mypy", "ruff", "pytest", "type-hints"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["bash", "read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-sonnet-4-6"]

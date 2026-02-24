@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "cargo",
+      "args": ["run", "--", "--registry", "test-registry"],
+      "env": {
+        "RUST_LOG": "skillet=debug"
+      }
+    }
+  }
+}

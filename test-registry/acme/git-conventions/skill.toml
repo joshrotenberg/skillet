@@ -1,0 +1,23 @@
+[skill]
+name = "git-conventions"
+owner = "acme"
+version = "1"
+description = "Git workflow conventions with conventional commits and branch naming"
+trigger = "Use when making git commits, creating branches, or managing PRs"
+license = "MIT"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["workflow", "git"]
+tags = ["git", "commits", "branches", "conventional-commits"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 2048
+required_tools = ["bash"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

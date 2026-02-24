@@ -1,0 +1,23 @@
+[skill]
+name = "code-review"
+owner = "joshrotenberg"
+version = "1.0.0"
+description = "Structured code review methodology"
+trigger = "Use when reviewing code changes, PRs, or diffs"
+license = "MIT"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["development", "review"]
+tags = ["code-review", "pr", "quality", "best-practices"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 8192
+required_tools = ["bash", "read"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6"]
