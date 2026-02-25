@@ -147,9 +147,10 @@ Requires Rust 1.90 or later.
 ## Status
 
 Working prototype. The skill schema is stable, the MCP interface is
-functional, and there is a small seed registry for testing. The registry
-format follows the same principles as crates.io -- flat files, git-backed,
-auditable history.
+functional, and the [default registry](https://github.com/joshrotenberg/skillet-registry)
+has 11 skills across development, devops, and security categories. The
+registry format follows the same principles as crates.io -- flat files,
+git-backed, auditable history.
 
 See [issues](https://github.com/joshrotenberg/grimoire/issues) for the
 roadmap.
