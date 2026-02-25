@@ -7,10 +7,14 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
+use crate::search::SkillSearch;
+
 /// Shared state for the MCP server
 pub struct AppState {
     /// In-memory skill index, refreshable
     pub index: RwLock<SkillIndex>,
+    /// BM25 search index over skills, rebuilt on refresh
+    pub search: RwLock<SkillSearch>,
     /// Path to the registry root (git checkout)
     pub registry_path: PathBuf,
     /// Registry configuration (from config.toml or defaults)
@@ -18,9 +22,15 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(registry_path: PathBuf, index: SkillIndex, config: RegistryConfig) -> Arc<Self> {
+    pub fn new(
+        registry_path: PathBuf,
+        index: SkillIndex,
+        search: SkillSearch,
+        config: RegistryConfig,
+    ) -> Arc<Self> {
         Arc::new(Self {
             index: RwLock::new(index),
+            search: RwLock::new(search),
             registry_path,
             config,
         })

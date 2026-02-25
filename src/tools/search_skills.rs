@@ -39,15 +39,31 @@ pub fn build(state: Arc<AppState>) -> Tool {
             state,
             |State(state): State<Arc<AppState>>, Json(input): Json<SearchSkillsInput>| async move {
                 let index = state.index.read().await;
-                let query_lower = input.query.to_lowercase();
 
-                let mut results: Vec<SkillSummary> = index
-                    .skills
-                    .values()
-                    .filter_map(|entry| {
-                        let summary = SkillSummary::from_entry(entry)?;
+                let results: Vec<SkillSummary> = if input.query == "*" {
+                    // Wildcard: return all skills, apply structured filters only
+                    index
+                        .skills
+                        .values()
+                        .filter_map(SkillSummary::from_entry)
+                        .collect()
+                } else {
+                    // BM25 search, then look up summaries
+                    let search = state.search.read().await;
+                    search
+                        .search(&input.query, 100)
+                        .into_iter()
+                        .filter_map(|(owner, name, _score)| {
+                            let entry = index.skills.get(&(owner, name))?;
+                            SkillSummary::from_entry(entry)
+                        })
+                        .collect()
+                };
 
-                        // Category filter
+                // Apply structured filters (category, tag, verified_with)
+                let results: Vec<SkillSummary> = results
+                    .into_iter()
+                    .filter(|summary| {
                         if let Some(ref cat) = input.category {
                             let cat_lower = cat.to_lowercase();
                             if !summary
@@ -55,19 +71,15 @@ pub fn build(state: Arc<AppState>) -> Tool {
                                 .iter()
                                 .any(|c| c.to_lowercase() == cat_lower)
                             {
-                                return None;
+                                return false;
                             }
                         }
-
-                        // Tag filter
                         if let Some(ref tag) = input.tag {
                             let tag_lower = tag.to_lowercase();
                             if !summary.tags.iter().any(|t| t.to_lowercase() == tag_lower) {
-                                return None;
+                                return false;
                             }
                         }
-
-                        // Verified-with filter
                         if let Some(ref model) = input.verified_with {
                             let model_lower = model.to_lowercase();
                             if !summary
@@ -75,37 +87,12 @@ pub fn build(state: Arc<AppState>) -> Tool {
                                 .iter()
                                 .any(|v| v.to_lowercase() == model_lower)
                             {
-                                return None;
+                                return false;
                             }
                         }
-
-                        // Text search across name, description, tags, categories, trigger
-                        if query_lower != "*" {
-                            let searchable = format!(
-                                "{} {} {} {} {} {}",
-                                summary.owner,
-                                summary.name,
-                                summary.description,
-                                summary.trigger.as_deref().unwrap_or(""),
-                                summary.categories.join(" "),
-                                summary.tags.join(" "),
-                            )
-                            .to_lowercase();
-
-                            let matches = query_lower
-                                .split_whitespace()
-                                .any(|term| searchable.contains(term));
-
-                            if !matches {
-                                return None;
-                            }
-                        }
-
-                        Some(summary)
+                        true
                     })
                     .collect();
-
-                results.sort_by(|a, b| a.owner.cmp(&b.owner).then_with(|| a.name.cmp(&b.name)));
 
                 if results.is_empty() {
                     return Ok(CallToolResult::text(format!(
