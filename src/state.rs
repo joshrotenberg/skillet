@@ -57,6 +57,16 @@ pub struct SkillVersion {
     pub skill_md: String,
     pub skill_toml_raw: String,
     pub yanked: bool,
+    /// Extra files in the skillpack (scripts/, references/, assets/)
+    /// Keyed by relative path from skill root (e.g. "scripts/lint.sh")
+    pub files: HashMap<String, SkillFile>,
+}
+
+/// An extra file in a skillpack
+#[derive(Debug, Clone)]
+pub struct SkillFile {
+    pub content: String,
+    pub mime_type: String,
 }
 
 /// Parsed skill.toml metadata
@@ -127,6 +137,9 @@ pub struct SkillSummary {
     pub categories: Vec<String>,
     pub tags: Vec<String>,
     pub verified_with: Vec<String>,
+    /// Extra files included in the skillpack
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
 }
 
 impl SkillSummary {
@@ -135,6 +148,8 @@ impl SkillSummary {
         let info = &v.metadata.skill;
         let classification = info.classification.as_ref();
         let compat = info.compatibility.as_ref();
+        let mut files: Vec<String> = v.files.keys().cloned().collect();
+        files.sort();
         Some(Self {
             owner: entry.owner.clone(),
             name: entry.name.clone(),
@@ -146,6 +161,7 @@ impl SkillSummary {
                 .unwrap_or_default(),
             tags: classification.map(|c| c.tags.clone()).unwrap_or_default(),
             verified_with: compat.map(|c| c.verified_with.clone()).unwrap_or_default(),
+            files,
         })
     }
 }

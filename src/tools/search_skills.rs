@@ -135,6 +135,16 @@ pub fn build(state: Arc<AppState>) -> Tool {
                             s.verified_with.join(", ")
                         ));
                     }
+                    if !s.files.is_empty() {
+                        output.push_str(&format!(
+                            "**Files:** {}\n",
+                            s.files
+                                .iter()
+                                .map(|f| format!("`{f}`"))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        ));
+                    }
                     output.push_str(&format!(
                         "**Use:** Read `skillet://skills/{}/{}` to use this skill\n\n",
                         s.owner, s.name

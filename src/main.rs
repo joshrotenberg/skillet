@@ -57,6 +57,7 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
     let skill_content = resources::skill_content::build(state.clone());
     let skill_content_versioned = resources::skill_content::build_versioned(state.clone());
     let skill_metadata = resources::skill_metadata::build(state.clone());
+    let skill_files = resources::skill_files::build(state.clone());
 
     // Assemble router
     let router = McpRouter::new()
@@ -71,10 +72,13 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
              Resources:\n\
              - skillet://skills/{owner}/{name}: Get a skill's SKILL.md content\n\
              - skillet://skills/{owner}/{name}/{version}: Get a specific version\n\
-             - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\n\
+             - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\
+             - skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
+             (scripts, references, or assets)\n\n\
              Workflow: search for skills with tools, then fetch the SKILL.md content \
              via resource templates. You can use the skill inline for this session \
-             or install it locally for persistent use.\n\n\
+             or install it locally for persistent use. If a skill includes extra \
+             files (scripts, references), fetch them via the files resource.\n\n\
              Using skills:\n\
              - **Inline (default)**: Read the resource and follow the skill's \
              instructions for the current session. No restart needed.\n\
@@ -90,7 +94,8 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
         .tool(list_skills_by_owner)
         .resource_template(skill_content)
         .resource_template(skill_content_versioned)
-        .resource_template(skill_metadata);
+        .resource_template(skill_metadata)
+        .resource_template(skill_files);
 
     tracing::info!("Serving over stdio");
     StdioTransport::new(router).run().await?;

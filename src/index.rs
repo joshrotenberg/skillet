@@ -9,7 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
-use crate::state::{SkillEntry, SkillIndex, SkillMetadata, SkillVersion};
+use crate::state::{SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion};
 
 /// Load a skill index from a registry directory.
 ///
@@ -141,12 +141,16 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
         );
     }
 
+    // Collect extra files from scripts/, references/, assets/
+    let files = load_extra_files(dir)?;
+
     let version = SkillVersion {
         version: metadata.skill.version.clone(),
         metadata,
         skill_md,
         skill_toml_raw,
         yanked: false,
+        files,
     };
 
     Ok(SkillEntry {
@@ -154,6 +158,70 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
         name: name.to_string(),
         versions: vec![version],
     })
+}
+
+/// Allowed subdirectories in a skillpack (per Agent Skills spec)
+const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets"];
+
+/// Load extra files from scripts/, references/, and assets/ subdirectories
+fn load_extra_files(
+    skill_dir: &Path,
+) -> anyhow::Result<std::collections::HashMap<String, SkillFile>> {
+    let mut files = std::collections::HashMap::new();
+
+    for subdir_name in EXTRA_DIRS {
+        let subdir = skill_dir.join(subdir_name);
+        if !subdir.is_dir() {
+            continue;
+        }
+
+        let entries = std::fs::read_dir(&subdir)
+            .with_context(|| format!("Failed to read {}", subdir.display()))?;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+
+            let file_name = entry.file_name().to_string_lossy().to_string();
+            let relative_path = format!("{subdir_name}/{file_name}");
+
+            // Only load text files
+            let content = match std::fs::read_to_string(&path) {
+                Ok(c) => c,
+                Err(_) => {
+                    tracing::debug!(
+                        path = %path.display(),
+                        "Skipping non-text file in skillpack"
+                    );
+                    continue;
+                }
+            };
+
+            let mime_type = guess_mime_type(&file_name);
+
+            files.insert(relative_path, SkillFile { content, mime_type });
+        }
+    }
+
+    Ok(files)
+}
+
+/// Simple mime type guessing based on file extension
+fn guess_mime_type(filename: &str) -> String {
+    match filename.rsplit('.').next() {
+        Some("md") => "text/markdown",
+        Some("sh" | "bash") => "text/x-shellscript",
+        Some("py") => "text/x-python",
+        Some("js") => "text/javascript",
+        Some("ts") => "text/typescript",
+        Some("json") => "application/json",
+        Some("toml") => "application/toml",
+        Some("yaml" | "yml") => "text/yaml",
+        _ => "text/plain",
+    }
+    .to_string()
 }
 
 #[cfg(test)]
