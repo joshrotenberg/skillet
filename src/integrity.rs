@@ -14,13 +14,13 @@ use crate::state::SkillFile;
 /// Per-file hashes for a skill version, plus a composite hash.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ContentHashes {
-    /// path -> "sha256:<hex>" for each file
+    /// path -> `"sha256:<hex>"` for each file
     pub files: BTreeMap<String, String>,
     /// Hash of the sorted (path + hash) pairs
     pub composite: String,
 }
 
-/// Compute SHA256 of a string, returned as `"sha256:<hex>"`.
+/// Compute SHA256 of a string, returned as `sha256:<hex>`.
 pub fn sha256_hex(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());

@@ -1177,7 +1177,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "skillet"
+name = "skillet-mcp"
 version = "0.1.0"
 dependencies = [
  "anyhow",
