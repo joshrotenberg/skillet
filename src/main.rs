@@ -7,6 +7,8 @@ mod bm25;
 mod git;
 mod index;
 mod integrity;
+mod pack;
+mod publish;
 mod resources;
 mod search;
 mod state;
@@ -42,6 +44,10 @@ enum Command {
     Serve(ServeArgs),
     /// Validate a skillpack directory
     Validate(ValidateArgs),
+    /// Pack a skillpack (validate + generate manifest + update versions)
+    Pack(PackArgs),
+    /// Publish a skillpack to a registry (pack + open PR)
+    Publish(PublishArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -80,6 +86,26 @@ struct ServeArgs {
 struct ValidateArgs {
     /// Path to the skillpack directory to validate
     path: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+struct PackArgs {
+    /// Path to the skillpack directory
+    path: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+struct PublishArgs {
+    /// Path to the skillpack directory
+    path: PathBuf,
+
+    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet-registry")
+    #[arg(long)]
+    repo: String,
+
+    /// Validate and show what would happen without creating a PR
+    #[arg(long)]
+    dry_run: bool,
 }
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
@@ -141,6 +167,8 @@ async fn main() -> ExitCode {
 
     match cli.command {
         Some(Command::Validate(args)) => run_validate(args),
+        Some(Command::Pack(args)) => run_pack(args),
+        Some(Command::Publish(args)) => run_publish(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     }
@@ -230,6 +258,72 @@ fn run_validate(args: ValidateArgs) -> ExitCode {
     }
 
     println!("\nValidation passed.");
+    ExitCode::SUCCESS
+}
+
+/// Run the `pack` subcommand.
+///
+/// Validates, generates MANIFEST.sha256, and updates versions.toml.
+fn run_pack(args: PackArgs) -> ExitCode {
+    let path = &args.path;
+    println!("Packing {} ...\n", path.display());
+
+    let result = match pack::pack(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  error: {e}");
+            eprintln!("\nPack failed.");
+            return ExitCode::from(1);
+        }
+    };
+
+    let v = &result.validation;
+    println!("  owner ................. {}", v.owner);
+    println!("  name .................. {}", v.name);
+    println!("  version ............... {}", v.version);
+
+    if result.manifest_written {
+        println!("  MANIFEST.sha256 ....... written");
+    }
+
+    if result.versions_updated {
+        println!("  versions.toml ......... updated");
+    } else {
+        println!("  versions.toml ......... up to date");
+    }
+
+    println!("\nPack succeeded.");
+    ExitCode::SUCCESS
+}
+
+/// Run the `publish` subcommand.
+///
+/// Packs the skill and opens a PR against the target registry repo.
+fn run_publish(args: PublishArgs) -> ExitCode {
+    let path = &args.path;
+    println!("Publishing {} to {} ...\n", path.display(), args.repo);
+
+    let result = match publish::publish(path, &args.repo, args.dry_run) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  error: {e}");
+            eprintln!("\nPublish failed.");
+            return ExitCode::from(1);
+        }
+    };
+
+    let v = &result.pack.validation;
+    println!("  owner ................. {}", v.owner);
+    println!("  name .................. {}", v.name);
+    println!("  version ............... {}", v.version);
+
+    if args.dry_run {
+        println!("\nDry run complete.");
+    } else {
+        println!("  PR .................... {}", result.pr_url);
+        println!("\nPublish succeeded.");
+    }
+
     ExitCode::SUCCESS
 }
 
