@@ -15,15 +15,15 @@ pub struct AppState {
     pub index: RwLock<SkillIndex>,
     /// BM25 search index over skills, rebuilt on refresh
     pub search: RwLock<SkillSearch>,
-    /// Path to the registry root (git checkout)
-    pub registry_path: PathBuf,
+    /// Paths to all registry roots (git checkouts)
+    pub registry_paths: Vec<PathBuf>,
     /// Registry configuration (from config.toml or defaults)
     pub config: RegistryConfig,
 }
 
 impl AppState {
     pub fn new(
-        registry_path: PathBuf,
+        registry_paths: Vec<PathBuf>,
         index: SkillIndex,
         search: SkillSearch,
         config: RegistryConfig,
@@ -31,7 +31,7 @@ impl AppState {
         Arc::new(Self {
             index: RwLock::new(index),
             search: RwLock::new(search),
-            registry_path,
+            registry_paths,
             config,
         })
     }
@@ -94,13 +94,39 @@ fn default_registry_version() -> u32 {
     1
 }
 
-/// In-memory index of all skills in the registry
+/// In-memory index of all skills across all registries
 #[derive(Debug, Default)]
 pub struct SkillIndex {
     /// All skills keyed by (owner, name)
     pub skills: HashMap<(String, String), SkillEntry>,
     /// All known categories with skill counts
     pub categories: BTreeMap<String, usize>,
+}
+
+impl SkillIndex {
+    /// Merge another index into this one. Skills already present are skipped
+    /// (first registry wins).
+    pub fn merge(&mut self, other: SkillIndex) {
+        for (key, entry) in other.skills {
+            if self.skills.contains_key(&key) {
+                tracing::debug!(
+                    owner = %key.0,
+                    name = %key.1,
+                    "Skipping duplicate skill from secondary registry"
+                );
+                continue;
+            }
+            // Update category counts for the new entry
+            if let Some(v) = entry.latest()
+                && let Some(ref c) = v.metadata.skill.classification
+            {
+                for cat in &c.categories {
+                    *self.categories.entry(cat.clone()).or_insert(0) += 1;
+                }
+            }
+            self.skills.insert(key, entry);
+        }
+    }
 }
 
 /// A skill with all its versions
