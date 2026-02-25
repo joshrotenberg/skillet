@@ -9,7 +9,7 @@ use tower_mcp::{
     extract::{Json, State},
 };
 
-use crate::state::{AppState, SkillSummary};
+use skillet_mcp::state::{AppState, SkillSummary};
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ListByOwnerInput {

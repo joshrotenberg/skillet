@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tower_mcp::protocol::{ReadResourceResult, ResourceContent};
 use tower_mcp::resource::{ResourceTemplate, ResourceTemplateBuilder};
 
-use crate::state::AppState;
+use skillet_mcp::state::AppState;
 
 /// Build the skill content resource template.
 ///

@@ -1,21 +1,12 @@
-//! Skillet MCP Server
+//! Skillet CLI and MCP Server
 //!
-//! An MCP-native skill registry for AI agents. Serves skills from a local
-//! registry directory (git checkout) via tools and resource templates.
+//! Binary entry point. CLI parsing (clap), MCP server setup (tower-mcp),
+//! and transport management. Core logic lives in the library crate.
 
-mod bm25;
-mod git;
-mod index;
-mod integrity;
-mod pack;
-mod publish;
 mod resources;
-mod search;
-mod state;
 mod tools;
-mod validate;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
@@ -24,7 +15,9 @@ use clap::{Parser, Subcommand};
 use tower_mcp::transport::http::HttpTransport;
 use tower_mcp::{McpRouter, StdioTransport};
 
-use crate::state::AppState;
+use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
+use skillet_mcp::state::AppState;
+use skillet_mcp::{git, index, pack, publish, registry, search, state, validate};
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
@@ -125,59 +118,6 @@ struct PublishArgs {
     dry_run: bool,
 }
 
-/// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
-fn parse_duration(s: &str) -> anyhow::Result<Duration> {
-    let s = s.trim();
-    if s == "0" {
-        return Ok(Duration::ZERO);
-    }
-
-    let (num, suffix) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
-    let num: u64 = num
-        .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid duration number: {s}"))?;
-
-    let secs = match suffix {
-        "s" | "" => num,
-        "m" => num * 60,
-        "h" => num * 3600,
-        _ => anyhow::bail!("Unknown duration suffix: {suffix} (use s, m, or h)"),
-    };
-
-    Ok(Duration::from_secs(secs))
-}
-
-/// Derive a cache directory from the remote URL.
-///
-/// Turns `https://github.com/owner/repo.git` into `<base>/owner_repo`.
-fn cache_dir_for_url(base: &Path, url: &str) -> PathBuf {
-    let slug: String = url
-        .trim_end_matches(".git")
-        .rsplit('/')
-        .take(2)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<Vec<_>>()
-        .join("_");
-
-    let slug = if slug.is_empty() {
-        "default".to_string()
-    } else {
-        slug
-    };
-
-    base.join(slug)
-}
-
-fn default_cache_dir() -> PathBuf {
-    if let Ok(home) = std::env::var("HOME") {
-        PathBuf::from(home).join(".cache").join("skillet")
-    } else {
-        PathBuf::from("/tmp").join("skillet")
-    }
-}
-
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -193,9 +133,6 @@ async fn main() -> ExitCode {
 }
 
 /// Run the `validate` subcommand.
-///
-/// Validates a skillpack directory and prints human-readable results.
-/// Returns exit code 0 on success, 1 on validation failure.
 fn run_validate(args: ValidateArgs) -> ExitCode {
     let path = &args.path;
     println!("Validating {} ...\n", path.display());
@@ -280,8 +217,6 @@ fn run_validate(args: ValidateArgs) -> ExitCode {
 }
 
 /// Run the `pack` subcommand.
-///
-/// Validates, generates MANIFEST.sha256, and updates versions.toml.
 fn run_pack(args: PackArgs) -> ExitCode {
     let path = &args.path;
     println!("Packing {} ...\n", path.display());
@@ -315,8 +250,6 @@ fn run_pack(args: PackArgs) -> ExitCode {
 }
 
 /// Run the `publish` subcommand.
-///
-/// Packs the skill and opens a PR against the target registry repo.
 fn run_publish(args: PublishArgs) -> ExitCode {
     let path = &args.path;
     println!("Publishing {} to {} ...\n", path.display(), args.repo);
@@ -346,8 +279,6 @@ fn run_publish(args: PublishArgs) -> ExitCode {
 }
 
 /// Run the `init-registry` subcommand.
-///
-/// Scaffolds a new skill registry: git init, config.toml, README, .gitignore.
 fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
     let path = &args.path;
 
@@ -365,7 +296,7 @@ fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
         })
         .unwrap_or_else(|| "my-skills".to_string());
 
-    if let Err(e) = init_registry(path, &name) {
+    if let Err(e) = registry::init_registry(path, &name) {
         eprintln!("Error: {e}");
         return ExitCode::from(1);
     }
@@ -380,106 +311,7 @@ fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
-    std::fs::create_dir_all(path)?;
-
-    // config.toml
-    let config = format!("[registry]\nname = \"{name}\"\nversion = 1\n", name = name);
-    std::fs::write(path.join("config.toml"), config)?;
-
-    // README.md
-    let readme = format!(
-        "# {name}\n\
-         \n\
-         A skill registry for [skillet](https://github.com/joshrotenberg/grimoire).\n\
-         \n\
-         ## Adding skills\n\
-         \n\
-         Create a directory for your skill:\n\
-         \n\
-         ```\n\
-         mkdir -p your-name/skill-name\n\
-         ```\n\
-         \n\
-         Add the two required files:\n\
-         \n\
-         - `skill.toml` -- metadata (name, description, categories, tags)\n\
-         - `SKILL.md` -- the skill prompt (Agent Skills spec compatible)\n\
-         \n\
-         Validate with `skillet validate your-name/skill-name`.\n\
-         \n\
-         ## Serving\n\
-         \n\
-         ```bash\n\
-         # Local\n\
-         skillet --registry .\n\
-         \n\
-         # Remote (after pushing to git)\n\
-         skillet --remote <git-url>\n\
-         ```\n",
-        name = name
-    );
-    std::fs::write(path.join("README.md"), readme)?;
-
-    // .gitignore
-    std::fs::write(path.join(".gitignore"), ".DS_Store\n")?;
-
-    // git init
-    let output = std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(path)
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git init failed: {stderr}");
-    }
-
-    // Set local git config if no global identity exists (e.g. in CI)
-    let has_identity = std::process::Command::new("git")
-        .args(["config", "user.name"])
-        .current_dir(path)
-        .output()
-        .is_ok_and(|o| o.status.success());
-
-    if !has_identity {
-        let _ = std::process::Command::new("git")
-            .args(["config", "user.name", "skillet"])
-            .current_dir(path)
-            .output();
-        let _ = std::process::Command::new("git")
-            .args(["config", "user.email", "skillet@localhost"])
-            .current_dir(path)
-            .output();
-    }
-
-    // initial commit
-    let output = std::process::Command::new("git")
-        .args(["add", "."])
-        .current_dir(path)
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git add failed: {stderr}");
-    }
-
-    let output = std::process::Command::new("git")
-        .args(["commit", "-m", "Initialize skill registry"])
-        .current_dir(path)
-        .output()?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git commit failed: {stderr}");
-    }
-
-    Ok(())
-}
-
 /// Build an MCP router from a loaded AppState.
-///
-/// Shared between `run_serve_inner` and tests.
 fn build_router(state: Arc<AppState>) -> McpRouter {
     let search_skills = tools::search_skills::build(state.clone());
     let list_categories = tools::list_categories::build(state.clone());
@@ -639,8 +471,6 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
 }
 
 /// Reload all skill indexes and rebuild search.
-///
-/// Shared by both the remote refresh task and the filesystem watch task.
 async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
     let paths = state.registry_paths.clone();
     let new_index = tokio::task::spawn_blocking(move || {
@@ -671,7 +501,6 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
 /// Spawn a background task that periodically pulls from a remote and
 /// reloads all indexes if the HEAD commit changes.
 fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
-    // Find the local cache path for this remote URL
     let cache_path = {
         let base = default_cache_dir();
         cache_dir_for_url(&base, &url)
@@ -829,80 +658,8 @@ fn spawn_watch_task(state: Arc<AppState>) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_parse_duration_seconds() {
-        assert_eq!(parse_duration("30s").unwrap(), Duration::from_secs(30));
-    }
-
-    #[test]
-    fn test_parse_duration_minutes() {
-        assert_eq!(parse_duration("5m").unwrap(), Duration::from_secs(300));
-    }
-
-    #[test]
-    fn test_parse_duration_hours() {
-        assert_eq!(parse_duration("1h").unwrap(), Duration::from_secs(3600));
-    }
-
-    #[test]
-    fn test_parse_duration_zero() {
-        assert_eq!(parse_duration("0").unwrap(), Duration::ZERO);
-    }
-
-    #[test]
-    fn test_parse_duration_bare_number() {
-        assert_eq!(parse_duration("60").unwrap(), Duration::from_secs(60));
-    }
-
-    #[test]
-    fn test_cache_dir_for_url_github() {
-        let base = PathBuf::from("/tmp/skillet");
-        let dir = cache_dir_for_url(&base, "https://github.com/owner/repo.git");
-        assert_eq!(dir, PathBuf::from("/tmp/skillet/owner_repo"));
-    }
-
-    #[test]
-    fn test_cache_dir_for_url_no_git_suffix() {
-        let base = PathBuf::from("/tmp/skillet");
-        let dir = cache_dir_for_url(&base, "https://github.com/owner/repo");
-        assert_eq!(dir, PathBuf::from("/tmp/skillet/owner_repo"));
-    }
-
-    #[test]
-    fn test_init_registry() {
-        let dir = tempfile::tempdir().unwrap();
-        let registry_path = dir.path().join("my-registry");
-
-        init_registry(&registry_path, "my-registry").unwrap();
-
-        // config.toml exists with correct name
-        let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();
-        assert!(config.contains("name = \"my-registry\""));
-        assert!(config.contains("version = 1"));
-
-        // README.md exists
-        assert!(registry_path.join("README.md").exists());
-
-        // .gitignore exists
-        assert!(registry_path.join(".gitignore").exists());
-
-        // git repo initialized with a commit
-        let output = std::process::Command::new("git")
-            .args(["log", "--oneline"])
-            .current_dir(&registry_path)
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        let log = String::from_utf8_lossy(&output.stdout);
-        assert!(log.contains("Initialize skill registry"));
-
-        // Can be loaded as a valid registry
-        let loaded_config = index::load_config(&registry_path).unwrap();
-        assert_eq!(loaded_config.registry.name, "my-registry");
-    }
-
     fn test_registry_path() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
     }
 
     /// Build a router backed by the test-registry for integration tests.
