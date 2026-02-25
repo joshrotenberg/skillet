@@ -1,0 +1,23 @@
+[skill]
+name = "setup"
+owner = "skillet"
+version = "2026.02.24"
+description = "Set up and configure the Skillet skill registry"
+trigger = "Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences"
+license = "MIT"
+
+[skill.author]
+name = "Skillet"
+github = "skillet"
+
+[skill.classification]
+categories = ["tools", "configuration"]
+tags = ["skillet", "skills", "setup", "mcp", "registry"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["bash", "read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

@@ -74,7 +74,16 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
              - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\n\
              Workflow: search for skills with tools, then fetch the SKILL.md content \
              via resource templates. You can use the skill inline for this session \
-             or install it locally for persistent use.",
+             or install it locally for persistent use.\n\n\
+             Using skills:\n\
+             - **Inline (default)**: Read the resource and follow the skill's \
+             instructions for the current session. No restart needed.\n\
+             - **Install**: Write the SKILL.md content to .claude/skills/<name>.md \
+             (project) or ~/.claude/skills/<name>.md (global) for persistent use \
+             across sessions. Requires a restart to take effect.\n\
+             - **Install and use**: Write the file for persistence AND follow \
+             the instructions inline for immediate use.\n\n\
+             Prefer inline use unless the user asks for installation.",
         )
         .tool(search_skills)
         .tool(list_categories)

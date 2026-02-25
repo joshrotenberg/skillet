@@ -136,7 +136,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                         ));
                     }
                     output.push_str(&format!(
-                        "**Fetch:** `skillet://skills/{}/{}`\n\n",
+                        "**Use:** Read `skillet://skills/{}/{}` to use this skill\n\n",
                         s.owner, s.name
                     ));
                 }
