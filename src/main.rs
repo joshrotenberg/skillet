@@ -67,6 +67,10 @@ struct ServeArgs {
     #[arg(long)]
     subdir: Option<PathBuf>,
 
+    /// Watch the local registry directory for changes and auto-reload
+    #[arg(long)]
+    watch: bool,
+
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
@@ -301,6 +305,11 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
     }
 
+    // Spawn filesystem watch task if requested
+    if args.watch {
+        spawn_watch_task(Arc::clone(&state));
+    }
+
     // Build tools
     let search_skills = tools::search_skills::build(state.clone());
     let list_categories = tools::list_categories::build(state.clone());
@@ -356,6 +365,21 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     Ok(())
 }
 
+/// Reload the skill index and search from disk.
+///
+/// Shared by both the remote refresh task and the filesystem watch task.
+async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
+    let registry_path = state.registry_path.clone();
+    let new_index =
+        tokio::task::spawn_blocking(move || index::load_index(&registry_path)).await??;
+    let new_search = search::SkillSearch::build(&new_index);
+    let mut idx = state.index.write().await;
+    let mut srch = state.search.write().await;
+    *idx = new_index;
+    *srch = new_search;
+    Ok(())
+}
+
 /// Spawn a background task that periodically pulls from the remote and
 /// reloads the index if the HEAD commit changes.
 fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
@@ -370,13 +394,13 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
 
             let registry_path = state.registry_path.clone();
 
-            let result = tokio::task::spawn_blocking(move || -> anyhow::Result<Option<_>> {
+            let pull_result = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
                 let before = git::head(&registry_path)?;
                 git::pull(&registry_path)?;
                 let after = git::head(&registry_path)?;
 
                 if before == after {
-                    return Ok(None);
+                    return Ok(false);
                 }
 
                 tracing::info!(
@@ -384,22 +408,24 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
                     after = %after,
                     "HEAD changed, reloading index"
                 );
-
-                let new_index = index::load_index(&registry_path)?;
-                Ok(Some(new_index))
+                Ok(true)
             })
             .await;
 
-            match result {
-                Ok(Ok(Some(new_index))) => {
-                    let new_search = search::SkillSearch::build(&new_index);
-                    let mut idx = state.index.write().await;
-                    let mut srch = state.search.write().await;
-                    *idx = new_index;
-                    *srch = new_search;
-                    tracing::info!(url = %url, "Index refreshed from remote");
-                }
-                Ok(Ok(None)) => {
+            match pull_result {
+                Ok(Ok(true)) => match reload_index(&state).await {
+                    Ok(()) => {
+                        tracing::info!(url = %url, "Index refreshed from remote");
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            url = %url,
+                            error = %e,
+                            "Failed to reload index after pull, keeping current index"
+                        );
+                    }
+                },
+                Ok(Ok(false)) => {
                     tracing::debug!(url = %url, "No changes from remote");
                 }
                 Ok(Err(e)) => {
@@ -414,6 +440,85 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
                         url = %url,
                         error = %e,
                         "Refresh task panicked, keeping current index"
+                    );
+                }
+            }
+        }
+    });
+}
+
+/// Spawn a background task that watches the local registry directory for
+/// changes and reloads the index when relevant files are modified.
+fn spawn_watch_task(state: Arc<AppState>) {
+    use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
+
+    tracing::info!(
+        registry = %state.registry_path.display(),
+        "Watching local registry for changes"
+    );
+
+    let watch_path = state.registry_path.clone();
+
+    tokio::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+
+        // The debouncer must live for the lifetime of the task
+        let _debouncer = {
+            let debounce_timeout = Duration::from_millis(500);
+            let rt = tokio::runtime::Handle::current();
+
+            let mut debouncer =
+                new_debouncer(debounce_timeout, move |events: Result<Vec<_>, _>| {
+                    if let Ok(events) = events {
+                        let _ = rt.block_on(tx.send(events));
+                    }
+                })
+                .expect("failed to create filesystem watcher");
+
+            debouncer
+                .watcher()
+                .watch(&watch_path, RecursiveMode::Recursive)
+                .expect("failed to watch registry directory");
+
+            debouncer
+        };
+
+        while let Some(events) = rx.recv().await {
+            let dominated_by_relevant = events.iter().any(|e| {
+                let path = &e.path;
+
+                // Skip .git directory changes
+                if path.components().any(|c| c.as_os_str() == ".git") {
+                    return false;
+                }
+
+                // Only react to files that matter for the index
+                match path.extension().and_then(|e| e.to_str()) {
+                    Some("toml" | "md") => true,
+                    _ => {
+                        // Also react to changes in extra-file directories
+                        path.components().any(|c| {
+                            let s = c.as_os_str().to_string_lossy();
+                            s == "scripts" || s == "references" || s == "assets"
+                        })
+                    }
+                }
+            });
+
+            if !dominated_by_relevant {
+                continue;
+            }
+
+            tracing::info!("Filesystem change detected, reloading index");
+
+            match reload_index(&state).await {
+                Ok(()) => {
+                    tracing::info!("Index reloaded from filesystem change");
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "Failed to reload index after filesystem change, keeping current index"
                     );
                 }
             }
