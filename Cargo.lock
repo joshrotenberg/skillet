@@ -1189,6 +1189,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tempfile",
+ "thiserror",
  "tokio",
  "toml",
  "tower-mcp",

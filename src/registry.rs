@@ -1,7 +1,11 @@
-//! Registry management: initialization and utility functions.
+//! Registry management: initialization, loading, and utility functions.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
+
+use crate::config::SkilletConfig;
+use crate::state::SkillIndex;
+use crate::{git, index};
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
 pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
@@ -156,6 +160,105 @@ pub fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Load and merge registries from CLI flags and/or config file.
+///
+/// Priority: if any flags are provided (`registry_flags` or `remote_flags`),
+/// use only those. Otherwise fall back to the config file's registries.
+/// Errors if no registries are available from either source.
+///
+/// Returns the merged skill index and the list of registry paths used
+/// (needed for registry identification in the installation manifest).
+pub fn load_registries(
+    registry_flags: &[PathBuf],
+    remote_flags: &[String],
+    config: &SkilletConfig,
+    subdir: Option<&Path>,
+) -> anyhow::Result<(SkillIndex, Vec<PathBuf>)> {
+    let has_flags = !registry_flags.is_empty() || !remote_flags.is_empty();
+
+    let (local_paths, remote_urls): (Vec<PathBuf>, Vec<&str>) = if has_flags {
+        let locals: Vec<PathBuf> = registry_flags
+            .iter()
+            .map(|p| match subdir {
+                Some(sub) => p.join(sub),
+                None => p.clone(),
+            })
+            .collect();
+        let remotes: Vec<&str> = remote_flags.iter().map(|s| s.as_str()).collect();
+        (locals, remotes)
+    } else {
+        let locals: Vec<PathBuf> = config
+            .registries
+            .local
+            .iter()
+            .map(|p| match subdir {
+                Some(sub) => p.join(sub),
+                None => p.clone(),
+            })
+            .collect();
+        let remotes: Vec<&str> = config
+            .registries
+            .remote
+            .iter()
+            .map(|s| s.as_str())
+            .collect();
+        (locals, remotes)
+    };
+
+    if local_paths.is_empty() && remote_urls.is_empty() {
+        anyhow::bail!(
+            "No registries configured. Use --registry, --remote, \
+             or add registries to ~/.config/skillet/config.toml"
+        );
+    }
+
+    let cache_base = default_cache_dir();
+    let mut registry_paths = Vec::new();
+
+    // Add local registries
+    for path in &local_paths {
+        registry_paths.push(path.clone());
+    }
+
+    // Clone/pull remote registries
+    for url in &remote_urls {
+        let target = cache_dir_for_url(&cache_base, url);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        git::clone_or_pull(url, &target)?;
+        let path = match subdir {
+            Some(sub) => target.join(sub),
+            None => target,
+        };
+        registry_paths.push(path);
+    }
+
+    // Load and merge all indexes
+    let mut merged = SkillIndex::default();
+    for path in &registry_paths {
+        let idx = index::load_index(path)?;
+        merged.merge(idx);
+    }
+
+    Ok((merged, registry_paths))
+}
+
+/// Identify a registry for manifest entries.
+///
+/// Returns the git URL as-is for remotes, `local:<abs_path>` for local registries.
+pub fn registry_id(path: &Path, remote_urls: &[String]) -> String {
+    // Check if this path is a cached clone of a remote
+    let cache_base = default_cache_dir();
+    for url in remote_urls {
+        let cached = cache_dir_for_url(&cache_base, url);
+        if path.starts_with(&cached) {
+            return url.clone();
+        }
+    }
+    format!("local:{}", path.display())
 }
 
 #[cfg(test)]
