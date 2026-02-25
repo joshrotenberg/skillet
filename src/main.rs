@@ -435,6 +435,24 @@ fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
         anyhow::bail!("git init failed: {stderr}");
     }
 
+    // Set local git config if no global identity exists (e.g. in CI)
+    let has_identity = std::process::Command::new("git")
+        .args(["config", "user.name"])
+        .current_dir(path)
+        .output()
+        .is_ok_and(|o| o.status.success());
+
+    if !has_identity {
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.name", "skillet"])
+            .current_dir(path)
+            .output();
+        let _ = std::process::Command::new("git")
+            .args(["config", "user.email", "skillet@localhost"])
+            .current_dir(path)
+            .output();
+    }
+
     // initial commit
     let output = std::process::Command::new("git")
         .args(["add", "."])
