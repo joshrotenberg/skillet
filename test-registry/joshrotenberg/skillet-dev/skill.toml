@@ -1,0 +1,23 @@
+[skill]
+name = "skillet-dev"
+owner = "joshrotenberg"
+version = "2026.02.24"
+description = "Skillet codebase conventions, architecture, and contribution workflow"
+trigger = "Use when working on the skillet codebase (the MCP skill registry itself)"
+license = "MIT"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["development", "rust"]
+tags = ["skillet", "mcp", "tower-mcp", "registry", "skills"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["bash", "read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6"]
