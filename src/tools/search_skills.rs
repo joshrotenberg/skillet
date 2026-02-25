@@ -150,6 +150,14 @@ pub fn build(state: Arc<AppState>) -> Tool {
                                 .join(", ")
                         ));
                     }
+                    if let Some(ref status) = s.integrity {
+                        let label = if status == "verified" {
+                            "**Integrity:** verified"
+                        } else {
+                            "**Integrity:** FAILED"
+                        };
+                        output.push_str(&format!("{label}\n"));
+                    }
                     output.push_str(&format!(
                         "**Use:** Read `skillet://skills/{}/{}` to use this skill\n\n",
                         s.owner, s.name
