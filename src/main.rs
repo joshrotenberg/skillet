@@ -327,6 +327,57 @@ fn run_publish(args: PublishArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Build an MCP router from a loaded AppState.
+///
+/// Shared between `run_serve_inner` and tests.
+fn build_router(state: Arc<AppState>) -> McpRouter {
+    let search_skills = tools::search_skills::build(state.clone());
+    let list_categories = tools::list_categories::build(state.clone());
+    let list_skills_by_owner = tools::list_skills_by_owner::build(state.clone());
+
+    let skill_content = resources::skill_content::build(state.clone());
+    let skill_content_versioned = resources::skill_content::build_versioned(state.clone());
+    let skill_metadata = resources::skill_metadata::build(state.clone());
+    let skill_files = resources::skill_files::build(state.clone());
+
+    McpRouter::new()
+        .server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"))
+        .instructions(
+            "Skillet is a skill registry for AI agents. Use it to discover and \
+             fetch skills relevant to your current task.\n\n\
+             Tools:\n\
+             - search_skills: Search for skills by keyword, category, tag, or model\n\
+             - list_categories: Browse all skill categories\n\
+             - list_skills_by_owner: List all skills by a publisher\n\n\
+             Resources:\n\
+             - skillet://skills/{owner}/{name}: Get a skill's SKILL.md content\n\
+             - skillet://skills/{owner}/{name}/{version}: Get a specific version\n\
+             - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\
+             - skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
+             (scripts, references, or assets)\n\n\
+             Workflow: search for skills with tools, then fetch the SKILL.md content \
+             via resource templates. You can use the skill inline for this session \
+             or install it locally for persistent use. If a skill includes extra \
+             files (scripts, references), fetch them via the files resource.\n\n\
+             Using skills:\n\
+             - **Inline (default)**: Read the resource and follow the skill's \
+             instructions for the current session. No restart needed.\n\
+             - **Install**: Write the SKILL.md content to .claude/skills/<name>.md \
+             (project) or ~/.claude/skills/<name>.md (global) for persistent use \
+             across sessions. Requires a restart to take effect.\n\
+             - **Install and use**: Write the file for persistence AND follow \
+             the instructions inline for immediate use.\n\n\
+             Prefer inline use unless the user asks for installation.",
+        )
+        .tool(search_skills)
+        .tool(list_categories)
+        .tool(list_skills_by_owner)
+        .resource_template(skill_content)
+        .resource_template(skill_content_versioned)
+        .resource_template(skill_metadata)
+        .resource_template(skill_files)
+}
+
 /// Run the MCP server (default behavior / `serve` subcommand).
 async fn run_serve(args: ServeArgs) -> ExitCode {
     // Initialize tracing
@@ -404,54 +455,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         spawn_watch_task(Arc::clone(&state));
     }
 
-    // Build tools
-    let search_skills = tools::search_skills::build(state.clone());
-    let list_categories = tools::list_categories::build(state.clone());
-    let list_skills_by_owner = tools::list_skills_by_owner::build(state.clone());
-
-    // Build resource templates
-    let skill_content = resources::skill_content::build(state.clone());
-    let skill_content_versioned = resources::skill_content::build_versioned(state.clone());
-    let skill_metadata = resources::skill_metadata::build(state.clone());
-    let skill_files = resources::skill_files::build(state.clone());
-
-    // Assemble router
-    let router = McpRouter::new()
-        .server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"))
-        .instructions(
-            "Skillet is a skill registry for AI agents. Use it to discover and \
-             fetch skills relevant to your current task.\n\n\
-             Tools:\n\
-             - search_skills: Search for skills by keyword, category, tag, or model\n\
-             - list_categories: Browse all skill categories\n\
-             - list_skills_by_owner: List all skills by a publisher\n\n\
-             Resources:\n\
-             - skillet://skills/{owner}/{name}: Get a skill's SKILL.md content\n\
-             - skillet://skills/{owner}/{name}/{version}: Get a specific version\n\
-             - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\
-             - skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
-             (scripts, references, or assets)\n\n\
-             Workflow: search for skills with tools, then fetch the SKILL.md content \
-             via resource templates. You can use the skill inline for this session \
-             or install it locally for persistent use. If a skill includes extra \
-             files (scripts, references), fetch them via the files resource.\n\n\
-             Using skills:\n\
-             - **Inline (default)**: Read the resource and follow the skill's \
-             instructions for the current session. No restart needed.\n\
-             - **Install**: Write the SKILL.md content to .claude/skills/<name>.md \
-             (project) or ~/.claude/skills/<name>.md (global) for persistent use \
-             across sessions. Requires a restart to take effect.\n\
-             - **Install and use**: Write the file for persistence AND follow \
-             the instructions inline for immediate use.\n\n\
-             Prefer inline use unless the user asks for installation.",
-        )
-        .tool(search_skills)
-        .tool(list_categories)
-        .tool(list_skills_by_owner)
-        .resource_template(skill_content)
-        .resource_template(skill_content_versioned)
-        .resource_template(skill_metadata)
-        .resource_template(skill_files);
+    let router = build_router(state);
 
     tracing::info!("Serving over stdio");
     StdioTransport::new(router).run().await?;
@@ -661,5 +665,145 @@ mod tests {
         let base = PathBuf::from("/tmp/skillet");
         let dir = cache_dir_for_url(&base, "https://github.com/owner/repo");
         assert_eq!(dir, PathBuf::from("/tmp/skillet/owner_repo"));
+    }
+
+    fn test_registry_path() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+    }
+
+    /// Build a router backed by the test-registry for integration tests.
+    fn test_router() -> tower_mcp::McpRouter {
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let skill_index = index::load_index(&registry_path).expect("load index");
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(registry_path, skill_index, skill_search, config);
+        build_router(state)
+    }
+
+    #[tokio::test]
+    async fn test_mcp_initialize() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        let init = client.initialize().await;
+
+        assert!(init.get("protocolVersion").is_some());
+        assert_eq!(
+            init.get("serverInfo")
+                .and_then(|s| s.get("name"))
+                .and_then(|n| n.as_str()),
+            Some("skillet")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list_tools() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let tools = client.list_tools().await;
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+
+        assert!(names.contains(&"search_skills"));
+        assert!(names.contains(&"list_categories"));
+        assert!(names.contains(&"list_skills_by_owner"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool("search_skills", serde_json::json!({"query": "rust"}))
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(text.contains("rust-dev"), "should find rust-dev skill");
+    }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills_wildcard() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool("search_skills", serde_json::json!({"query": "*"}))
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(text.contains("Found"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list_categories() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool("list_categories", serde_json::json!({}))
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(text.contains("development"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list_skills_by_owner() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "list_skills_by_owner",
+                serde_json::json!({"owner": "joshrotenberg"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(text.contains("rust-dev"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_read_skill_resource() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .read_resource("skillet://skills/joshrotenberg/rust-dev")
+            .await;
+
+        let text = result.first_text().expect("should have text content");
+        assert!(
+            text.contains("Rust"),
+            "SKILL.md content should mention Rust"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_read_metadata_resource() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .read_resource("skillet://metadata/joshrotenberg/rust-dev")
+            .await;
+
+        let text = result.first_text().expect("should have text content");
+        assert!(text.contains("[skill]"), "should return skill.toml content");
     }
 }
