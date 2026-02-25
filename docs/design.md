@@ -2,9 +2,8 @@
 
 A skill registry for AI agents, distributed over MCP.
 
-Working name: skillet. Previous name: grimoire. Other candidates: folio,
-pantry, quiver. The logo is a cartoon cast iron skillet cooking up some
-markdown.
+Working name: skillet. Previous name: grimoire. The logo is a cartoon cast
+iron skillet cooking up some markdown.
 
 ## Problem Statement
 
@@ -13,8 +12,6 @@ across Claude Code, Cursor, Copilot, Gemini CLI, and others. Distribution
 is the unsolved problem. Skills are scattered across GitHub repos, npm
 packages, and copy-paste. There is no Homebrew or crates.io for agent
 skills.
-
-Current distribution methods and their limitations:
 
 | Method | Limitation |
 |--------|-----------|
@@ -29,8 +26,6 @@ Current distribution methods and their limitations:
 Connect an MCP server, get runtime access to a searchable, categorized
 repository of skills. No local installation, no package manager, no build
 step.
-
-Installation is one JSON block:
 
 ```json
 {
@@ -62,58 +57,78 @@ with dynamic updates.
 - **Model compatibility**: Hybrid approach. Machine-readable capability
   flags (requires_tool_use, min_context_tokens) for agent filtering.
   Human-readable "verified with" badges for trust signals.
-- **Transport-agnostic index**: Same file format whether served from git
-  clone, sparse HTTP, or API. Start with git, migrate transport later
-  without schema changes.
-- **Start simple**: Git repo backend, no database, no web UI, no auth.
-  Just an MCP server reading a git checkout.
+- **Start simple**: Local directory backend, no database, no web UI, no
+  auth. Just an MCP server reading a directory tree.
 
 ## Architecture
 
-### Three-Layer Model
+The server reads a registry directory (currently a local path, eventually a
+git checkout), loads all skills into an in-memory index, and serves them
+over MCP via tools (search/browse) and resource templates (fetch content).
 
-Following the crates.io / Homebrew pattern:
+```
+registry/              MCP Server              Agent
+  owner/              +-------------+
+    skill-name/  -->  | Load index  |  <---->  Tools: search, browse
+      skill.toml      | Serve MCP   |  <---->  Resources: fetch content
+      SKILL.md        +-------------+
+      scripts/
+      references/
+      assets/
+```
 
-| Layer | Implementation | Purpose |
-|-------|---------------|---------|
-| Discovery index | Git repo, flat `owner/skill-name` dirs | Find skills, filter, resolve versions |
-| Content storage | Same git repo (skills are tiny) | Store skill.toml + SKILL.md packages |
-| MCP server | tower-mcp Rust server | Search, browse, fetch via tools + resource templates |
+### Application State
 
-Content storage can split out to object storage + CDN later if needed.
-Skills are a few KB each so a single git repo scales far before that's
-necessary.
+```rust
+struct AppState {
+    index: RwLock<SkillIndex>,
+    registry_path: PathBuf,
+}
 
-### Precedent: crates.io Architecture
+struct SkillIndex {
+    skills: HashMap<(String, String), SkillEntry>,
+    categories: BTreeMap<String, usize>,
+}
+```
 
-The crates.io model that informed this design:
+The index is behind a `RwLock` to support future background refresh (git
+pull on an interval).
 
-| Layer | crates.io | Skillet equivalent |
-|-------|-----------|-------------------|
-| Discovery index | Git repo (crates.io-index) with prefix-sharded JSON-lines, now mostly served via sparse HTTP | Git repo with flat owner/name metadata files |
-| Content storage | S3 behind CloudFront | Same git repo initially, migrate to object storage if needed |
-| Management API | Rust web server + PostgreSQL | MCP server (skillet itself) |
+### Project Structure
 
-Key insight from both crates.io and Homebrew: the index format must be
-transport-agnostic from day one. Same files whether served from git clone,
-sparse HTTP, or an API. The migration from git to sparse+CDN is a transport
-change, not a schema change.
+```
+src/
+  main.rs              # CLI args, tracing, router assembly, stdio transport
+  state.rs             # AppState, SkillIndex, SkillEntry, SkillVersion, SkillFile
+  index.rs             # Directory walking, skill.toml/SKILL.md parsing, file loading
+  tools/
+    mod.rs
+    search_skills.rs   # Full-text search with category/tag/model filters
+    list_categories.rs # Browse category taxonomy with counts
+    list_skills_by_owner.rs
+  resources/
+    mod.rs
+    skill_content.rs   # skillet://skills/{owner}/{name}[/{version}]
+    skill_metadata.rs  # skillet://metadata/{owner}/{name}
+    skill_files.rs     # skillet://files/{owner}/{name}/{path}
+```
 
-### Alternative Registries
+## Skillpack Format
 
-Like cargo's model: a `config.toml` at the repo root points to content
-URLs. For internal/private registries, stand up your own git repo with the
-same format and point skillet at it. The protocol is identical; only the
-URL differs.
-
-## Skill Package Format
+A skillpack is the unit of distribution: everything needed for a skill.
 
 ```
 owner/skill-name/
-  skill.toml       # registry metadata
-  SKILL.md         # Agent Skills spec-compatible prompt template
-  README.md        # optional human-readable docs
+  skill.toml           # Registry metadata (required)
+  SKILL.md             # Agent Skills spec-compatible prompt (required)
+  scripts/             # Executable scripts referenced by the skill
+  references/          # Reference docs (style guides, checklists, etc.)
+  assets/              # Templates, configs, other static files
 ```
+
+The extra directories follow the Agent Skills specification. Files in these
+directories are served via the `skillet://files/` resource template and
+listed in search results so agents know what's available.
 
 ### skill.toml
 
@@ -135,14 +150,11 @@ categories = ["development", "rust"]
 tags = ["rust", "cargo", "clippy", "fmt", "testing"]
 
 [skill.compatibility]
-# Machine-readable gates (agent uses these to filter)
 requires_tool_use = true
 requires_vision = false
 min_context_tokens = 4096
 required_tools = ["bash", "read", "write", "edit"]
 required_mcp_servers = []
-
-# Human-readable trust signal (not a gate)
 verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
 ```
 
@@ -177,70 +189,49 @@ Creator's choice. The registry stores version strings and enforces:
 
 Convention options: semver (`1.2.0`), calver (`2026.02.24`), monotonic
 (`3`). The `latest` version is always the most recently published
-non-yanked version. Index entries carry a `published` timestamp for
-date-based sorting regardless of versioning scheme.
-
-### Future: Skill Parameters
-
-Deferred but planned. Skills could have template variables (`{edition}`)
-populated by the consumer at fetch time. The `[skill.parameters]` table in
-skill.toml would declare available parameters with types, defaults, and
-descriptions. Not in v1.
-
-## Index Format
-
-Flat directory structure: `owner/skill-name` files containing JSON-lines,
-one line per published version.
-
-```
-# File: joshrotenberg/rust-dev
-{"owner":"joshrotenberg","name":"rust-dev","vers":"2026.02.24","cksum":"sha256:abc123","categories":["development","rust"],"tags":["rust","cargo"],"requires_tool_use":true,"verified_with":["claude-opus-4-6"],"published":"2026-02-24T12:00:00Z","yanked":false}
-```
-
-No prefix-sharding initially. Flat `owner/skill-name` is simple and maps
-directly to resource template URIs. Add sharding if/when the index grows
-to warrant it.
-
-### config.toml (Registry Root)
-
-```toml
-[registry]
-name = "skillet"
-version = 1
-
-[registry.urls]
-download = "https://skills.example.com/packages/{owner}/{name}/{version}.tar.gz"
-api = "https://skills.example.com/api/v1"
-
-[registry.auth]
-required = false
-```
-
-For pure git-backed registries, `download` is optional (content lives in
-the same repo). Having the field from day one supports future splits.
+non-yanked version.
 
 ## MCP Interface
 
-### Tools (discovery/search)
+### Tools
 
-- `search_skills(query, categories?, tags?, verified_with?)` -- full-text
-  search over index entries
-- `list_categories()` -- browse the category taxonomy
-- `list_skills_by_owner(owner)` -- everything by one publisher
+| Tool | Parameters | Purpose |
+|------|-----------|---------|
+| `search_skills` | `query`, `category?`, `tag?`, `verified_with?` | Search skills by keyword with optional filters |
+| `list_categories` | (none) | Browse category taxonomy with skill counts |
+| `list_skills_by_owner` | `owner` | List all skills by a publisher |
 
-### Resource Templates (direct access)
+### Resource Templates
 
-- `skillet://skills/{owner}/{name}` -- returns SKILL.md content (latest)
-- `skillet://skills/{owner}/{name}/{version}` -- specific version
-- `skillet://metadata/{owner}/{name}` -- returns full skill.toml
+| URI | Returns | Content-Type |
+|-----|---------|-------------|
+| `skillet://skills/{owner}/{name}` | SKILL.md (latest version) | text/markdown |
+| `skillet://skills/{owner}/{name}/{version}` | SKILL.md (specific version) | text/markdown |
+| `skillet://metadata/{owner}/{name}` | Full skill.toml | application/toml |
+| `skillet://files/{owner}/{name}/{path}` | Skillpack file (scripts, references, assets) | varies |
 
-### Tools (management, future)
+### Agent Workflow
 
-- `publish_skill` -- submit a new version
-- `yank_version` -- mark a version as yanked
+1. **Search** via tools to find relevant skills
+2. **Fetch** SKILL.md via resource template
+3. **Use** the skill -- three modes:
 
-Agent workflow: search via tools, fetch via resource template, use inline.
-No installation step.
+| Mode | What happens | Restart? |
+|------|-------------|----------|
+| **Inline** (default) | Agent reads the skill content and follows it for the current session | No |
+| **Install** | Agent writes SKILL.md to `.claude/skills/` for persistent use | Yes |
+| **Install and use** | Write to disk for persistence AND follow inline immediately | No (for this session) |
+
+Inline use is the default and the key differentiator. The agent doesn't
+need to install anything -- it fetches the skill and follows it in context.
+This is what makes skillet a live skill library rather than just a package
+manager.
+
+### Setup Meta-Skill
+
+The `skillet/setup` skill is a bootstrapping meta-skill that teaches agents
+how to configure and use skillet. It covers MCP configuration, searching,
+fetching, and the inline/install workflow.
 
 ## Trust Model
 
@@ -251,114 +242,86 @@ No installation step.
 - Signed commits can be required
 - Contributors are GitHub-authenticated
 
-### Additional Layers
+### Additional Layers (planned)
 
 - **Namespace ownership**: once `owner/*` is claimed via first PR, only
   that GitHub user can publish to it. Enforced by CI.
-- **Content hashing**: index stores SHA256 of skill content. Consumers
-  verify integrity.
+- **Content hashing**: SHA256 of skill content for integrity verification.
 - **Skill scanning**: automated PR checks for prompt injection patterns,
-  exfiltration attempts, destructive commands. Raises the floor.
+  exfiltration attempts, destructive commands.
 - **Verified publishers**: badge (not gate) linking namespace to verified
   GitHub org.
-- **Community flagging**: report skills via MCP tool or GitHub issue.
-  Flagged skills get warning label pending review.
+- **Community flagging**: report skills via GitHub issue. Flagged skills
+  get warning label pending review.
 
-### Launch Strategy: Curated First
+## Deployment
 
-Start with verified publishers only. Seed with 10-20 high-quality skills
-covering common workflows, then invite known-good skill authors. Open the
-gates once quality norms are established.
+### Local Development
 
-Rationale: 41.7% of skills in the wild contain serious security
-vulnerabilities. 50 high-quality skills that all work is more valuable than
-5,000 untested ones. Homebrew, crates.io, and npm all started small and
-curated. You can always open up later; you can never un-open.
+```bash
+cargo run -- --registry test-registry
+```
+
+The `--registry` flag points to a local directory with the `owner/skill-name/`
+structure. The `.mcp.json` at the project root configures this for local
+testing.
+
+### Production (planned)
+
+Docker image that either mounts a local registry or clones from a remote
+git URL:
+
+```bash
+# Local mount
+docker run -i --rm -v /path/to/registry:/registry skillet --registry /registry
+
+# Remote clone (planned)
+docker run -i --rm -e SKILLET_REMOTE=https://github.com/skillet-registry/index.git skillet
+```
+
+### Public vs Self-Hosted
+
+Two deployment models:
+
+- **Public server**: Curated registry, better search (potentially
+  Redis-backed), verified publishers, API key for zero-install access.
+- **Self-hosted**: Run from Docker/binary against any registry (your org's
+  private skills, a fork of the public registry, etc.). Full
+  configurability.
 
 ## Tech Stack
 
-- **MCP server**: Rust, tower-mcp
-- **Index backend**: local git checkout, refreshed on interval or webhook
-- **Distribution**: Docker image
-- **CI**: GitHub Actions for PR validation, skill scanning, index integrity
+- **MCP server**: Rust, tower-mcp 0.6
+- **Index backend**: local directory (git checkout planned)
+- **Serialization**: toml (skill metadata), serde_json (MCP protocol)
+- **Distribution**: Docker image (planned)
+- **CI**: GitHub Actions (planned)
 
-## Server Architecture
+## Roadmap
 
-### Application State
+See [GitHub issues](https://github.com/joshrotenberg/grimoire/issues) for
+detailed tracking. Key next steps:
 
-```rust
-struct AppState {
-    index: RwLock<SkillIndex>,
-    repo_path: PathBuf,
-    content_path: PathBuf,
-}
-
-struct SkillIndex {
-    skills: HashMap<(String, String), Vec<IndexEntry>>,  // (owner, name) -> versions
-    categories: BTreeSet<String>,
-}
-```
-
-### Project Structure
-
-```
-src/
-  main.rs              # CLI args, transport setup, router assembly
-  state.rs             # AppState, SkillIndex, IndexEntry
-  index.rs             # Git repo loading, index parsing
-  tools/
-    mod.rs
-    search_skills.rs
-    list_categories.rs
-    list_skills_by_owner.rs
-  resources/
-    mod.rs
-    skill_content.rs   # SKILL.md resource templates
-    skill_metadata.rs  # skill.toml resource template
-```
-
-### Configuration
-
-```
-skillet-server --repo /path/to/index        # local git checkout
-skillet-server --remote https://github.com/skillet-registry/index.git
-```
-
-The `--remote` variant clones on startup and refreshes on an interval.
-For Docker, the image either mounts a local checkout or clones from a
-configured remote.
-
-## Competitive Landscape (Feb 2026)
-
-| Project | What it is | Stage | Differentiator |
-|---------|-----------|-------|----------------|
-| awesome-claude-skills | GitHub list | Curated links | Not a registry |
-| skills-npm (antfu) | npm discovery | Finds SKILL.md in node_modules | Tied to Node ecosystem |
-| SkillUse | CLI + GitHub backend | Early | Closest to skillet, no MCP |
-| SkillDock | Versioned registry | Early, unclear traction | Web-based |
-| Claude Plugins | Auto-crawler | Indexes 63k+ from GitHub | No curation, auto-discovery |
-| **Skillet** | **MCP-native registry** | **Design phase** | **Agent discovers skills at runtime via MCP** |
-
-Nobody has built the MCP-native registry. Every other approach requires a
-CLI, a package manager, or manual file copying. Skillet is the only one
-where the agent discovers and fetches skills at runtime through the
-protocol it already speaks.
+- **Git backend**: Clone from remote, periodic refresh (#1)
+- **Multi-version support**: Store and serve multiple versions per skill (#2)
+- **Registry config.toml**: Support alternative/private registries (#3)
+- **Content hashing**: SHA256 integrity verification (#4)
+- **Search quality**: Move beyond substring matching (#5)
+- **Publishing workflow**: `skillet publish` CLI (#6)
 
 ## Open Questions
 
-- Skill parameters/template variables: deferred but planned.
+- Skill parameters/template variables: deferred but planned. Skills could
+  have `{edition}` style variables populated by the consumer at fetch time.
 - Curation at scale: same unsolved problem as every package registry,
   compounded by no compiler to enforce quality.
-- How consuming agents use fetched skills at runtime: inline expansion
-  into context? Dynamic skill registration? Depends on agent capabilities.
 - Categories taxonomy: who defines the canonical categories? Start with
   a small curated set, expand via PR.
-- Business model: public registry is hard to monetize directly (crates.io
-  and Homebrew are non-profits). Potential in hosted private registries
-  for enterprise, verification/trust services, or platform leverage.
 - Naming: skillet is the current favorite. Domain and GitHub org TBD.
 
 ## Status
 
-Design phase. Schema and architecture defined. Next: scaffold the
-tower-mcp server.
+POC complete. Working MCP server with 10 skills across 4 owners. Search,
+browse, and fetch all functional. Inline use model validated. Skillpack
+file support implemented. Ready for git backend integration and
+multi-version support.

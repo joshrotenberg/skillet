@@ -18,12 +18,29 @@ steps, or runtime code. Stuffing a markdown file into an npm package to
 get versioning and distribution is a solution born of "it's the only
 thing we have."
 
+## Competitive Landscape (Feb 2026)
+
+| Project | What it is | Stage | Differentiator |
+|---------|-----------|-------|----------------|
+| awesome-claude-skills | GitHub list | Curated links | Not a registry |
+| skills-npm (antfu) | npm discovery | Finds SKILL.md in node_modules | Tied to Node ecosystem |
+| SkillUse | CLI + GitHub backend | Early | Closest to skillet, no MCP |
+| SkillDock | Versioned registry | Early, unclear traction | Web-based |
+| SkillsMP (skillsmp.com) | Web crawler/directory | 270k+ skills indexed | No MCP, no versioning, manual install |
+| Claude Plugins | Auto-crawler | Indexes 63k+ from GitHub | No curation, auto-discovery |
+| **Skillet** | **MCP-native registry** | **POC complete** | **Agent discovers skills at runtime via MCP** |
+
 ## Competitive Moat
 
 The MCP-native angle is the differentiator. Every other registry requires
 a CLI, a package manager, or manual file copying. Skillet is the only
 approach where the agent discovers and retrieves skills through the
 protocol it already speaks. No installation step, no ecosystem lock-in.
+
+SkillsMP validates the demand (270k+ skills indexed) but solves discovery
+with a web UI, not an agent-native interface. Their catalog is broad but
+uncurated and requires manual install. Skillet's inline-use model means
+the agent fetches and follows skills at runtime with zero friction.
 
 ## Launch Strategy
 
