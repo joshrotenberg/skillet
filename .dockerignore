@@ -1,0 +1,7 @@
+target/
+.git/
+.github/
+.claude/
+CLAUDE.md
+docs/
+test-registry/
