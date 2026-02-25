@@ -49,6 +49,8 @@ enum Command {
     Pack(PackArgs),
     /// Publish a skillpack to a registry (pack + open PR)
     Publish(PublishArgs),
+    /// Initialize a new skill registry
+    InitRegistry(InitRegistryArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -97,6 +99,16 @@ struct ValidateArgs {
 struct PackArgs {
     /// Path to the skillpack directory
     path: PathBuf,
+}
+
+#[derive(clap::Args, Debug)]
+struct InitRegistryArgs {
+    /// Directory to create the registry in
+    path: PathBuf,
+
+    /// Registry name (defaults to directory name)
+    #[arg(long)]
+    name: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -174,6 +186,7 @@ async fn main() -> ExitCode {
         Some(Command::Validate(args)) => run_validate(args),
         Some(Command::Pack(args)) => run_pack(args),
         Some(Command::Publish(args)) => run_publish(args),
+        Some(Command::InitRegistry(args)) => run_init_registry(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     }
@@ -330,6 +343,120 @@ fn run_publish(args: PublishArgs) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Run the `init-registry` subcommand.
+///
+/// Scaffolds a new skill registry: git init, config.toml, README, .gitignore.
+fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
+    let path = &args.path;
+
+    if path.exists() {
+        eprintln!("Error: {} already exists", path.display());
+        return ExitCode::from(1);
+    }
+
+    let name = args
+        .name
+        .or_else(|| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .map(|s| s.to_string())
+        })
+        .unwrap_or_else(|| "my-skills".to_string());
+
+    if let Err(e) = init_registry(path, &name) {
+        eprintln!("Error: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Initialized skill registry at {}", path.display());
+    println!();
+    println!("  cd {}", path.display());
+    println!("  # add skills: mkdir -p owner/skill-name");
+    println!("  # serve locally: skillet --registry .");
+    println!("  # push and serve remotely: skillet --remote <git-url>");
+
+    ExitCode::SUCCESS
+}
+
+fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
+    std::fs::create_dir_all(path)?;
+
+    // config.toml
+    let config = format!("[registry]\nname = \"{name}\"\nversion = 1\n", name = name);
+    std::fs::write(path.join("config.toml"), config)?;
+
+    // README.md
+    let readme = format!(
+        "# {name}\n\
+         \n\
+         A skill registry for [skillet](https://github.com/joshrotenberg/grimoire).\n\
+         \n\
+         ## Adding skills\n\
+         \n\
+         Create a directory for your skill:\n\
+         \n\
+         ```\n\
+         mkdir -p your-name/skill-name\n\
+         ```\n\
+         \n\
+         Add the two required files:\n\
+         \n\
+         - `skill.toml` -- metadata (name, description, categories, tags)\n\
+         - `SKILL.md` -- the skill prompt (Agent Skills spec compatible)\n\
+         \n\
+         Validate with `skillet validate your-name/skill-name`.\n\
+         \n\
+         ## Serving\n\
+         \n\
+         ```bash\n\
+         # Local\n\
+         skillet --registry .\n\
+         \n\
+         # Remote (after pushing to git)\n\
+         skillet --remote <git-url>\n\
+         ```\n",
+        name = name
+    );
+    std::fs::write(path.join("README.md"), readme)?;
+
+    // .gitignore
+    std::fs::write(path.join(".gitignore"), ".DS_Store\n")?;
+
+    // git init
+    let output = std::process::Command::new("git")
+        .args(["init"])
+        .current_dir(path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git init failed: {stderr}");
+    }
+
+    // initial commit
+    let output = std::process::Command::new("git")
+        .args(["add", "."])
+        .current_dir(path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git add failed: {stderr}");
+    }
+
+    let output = std::process::Command::new("git")
+        .args(["commit", "-m", "Initialize skill registry"])
+        .current_dir(path)
+        .output()?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("git commit failed: {stderr}");
+    }
+
+    Ok(())
 }
 
 /// Build an MCP router from a loaded AppState.
@@ -678,6 +805,39 @@ mod tests {
         let base = PathBuf::from("/tmp/skillet");
         let dir = cache_dir_for_url(&base, "https://github.com/owner/repo");
         assert_eq!(dir, PathBuf::from("/tmp/skillet/owner_repo"));
+    }
+
+    #[test]
+    fn test_init_registry() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry_path = dir.path().join("my-registry");
+
+        init_registry(&registry_path, "my-registry").unwrap();
+
+        // config.toml exists with correct name
+        let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();
+        assert!(config.contains("name = \"my-registry\""));
+        assert!(config.contains("version = 1"));
+
+        // README.md exists
+        assert!(registry_path.join("README.md").exists());
+
+        // .gitignore exists
+        assert!(registry_path.join(".gitignore").exists());
+
+        // git repo initialized with a commit
+        let output = std::process::Command::new("git")
+            .args(["log", "--oneline"])
+            .current_dir(&registry_path)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        let log = String::from_utf8_lossy(&output.stdout);
+        assert!(log.contains("Initialize skill registry"));
+
+        // Can be loaded as a valid registry
+        let loaded_config = index::load_config(&registry_path).unwrap();
+        assert_eq!(loaded_config.registry.name, "my-registry");
     }
 
     fn test_registry_path() -> PathBuf {
