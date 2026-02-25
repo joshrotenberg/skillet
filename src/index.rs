@@ -9,6 +9,7 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
+use crate::integrity;
 use crate::state::{
     RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion,
     VersionsManifest,
@@ -178,6 +179,10 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
     let versions = if versions_path.is_file() {
         load_versions_manifest(&versions_path, &metadata)?
     } else {
+        // Compute content hashes
+        let computed = integrity::compute_hashes(&skill_toml_raw, &skill_md, &files);
+        let (content_hash, integrity_ok) = verify_manifest(dir, &computed);
+
         // Single-version backward compat
         vec![SkillVersion {
             version: metadata.skill.version.clone(),
@@ -188,6 +193,8 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
             files,
             published: None,
             has_content: true,
+            content_hash: Some(content_hash),
+            integrity_ok,
         }]
     };
 
@@ -245,7 +252,10 @@ fn load_versions_manifest(
         let is_last = i == total - 1;
 
         if is_last {
-            // Latest version: full content from disk
+            // Latest version: full content from disk, compute + verify hashes
+            let computed = integrity::compute_hashes(&skill_toml_raw, &skill_md, &files);
+            let (content_hash, integrity_ok) = verify_manifest(skill_dir, &computed);
+
             versions.push(SkillVersion {
                 version: record.version,
                 metadata: current_metadata.clone(),
@@ -255,6 +265,8 @@ fn load_versions_manifest(
                 files: files.clone(),
                 published: Some(record.published),
                 has_content: true,
+                content_hash: Some(content_hash),
+                integrity_ok,
             });
         } else {
             // Historical version: placeholder metadata, no content
@@ -280,11 +292,69 @@ fn load_versions_manifest(
                 files: std::collections::HashMap::new(),
                 published: Some(record.published),
                 has_content: false,
+                content_hash: None,
+                integrity_ok: None,
             });
         }
     }
 
     Ok(versions)
+}
+
+/// Read and verify a `MANIFEST.sha256` file against computed hashes.
+///
+/// Returns `(composite_hash, integrity_ok)` where `integrity_ok` is:
+/// - `None` if no manifest exists (backward compat)
+/// - `Some(true)` if hashes match
+/// - `Some(false)` if mismatches detected (logged as warnings)
+fn verify_manifest(
+    skill_dir: &Path,
+    computed: &integrity::ContentHashes,
+) -> (String, Option<bool>) {
+    let manifest_path = skill_dir.join("MANIFEST.sha256");
+    let content_hash = computed.composite.clone();
+
+    if !manifest_path.is_file() {
+        return (content_hash, None);
+    }
+
+    let raw = match std::fs::read_to_string(&manifest_path) {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "Failed to read MANIFEST.sha256, skipping verification"
+            );
+            return (content_hash, None);
+        }
+    };
+
+    let expected = match integrity::parse_manifest(&raw) {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                error = %e,
+                "Failed to parse MANIFEST.sha256, skipping verification"
+            );
+            return (content_hash, None);
+        }
+    };
+
+    let mismatches = integrity::verify(computed, &expected);
+    if mismatches.is_empty() {
+        (content_hash, Some(true))
+    } else {
+        for m in &mismatches {
+            tracing::warn!(
+                path = %manifest_path.display(),
+                mismatch = %m,
+                "Content integrity check failed"
+            );
+        }
+        (content_hash, Some(false))
+    }
 }
 
 /// Allowed subdirectories in a skillpack (per Agent Skills spec)
@@ -584,6 +654,8 @@ required = true
                     files: std::collections::HashMap::new(),
                     published: Some("2026-01-01T00:00:00Z".to_string()),
                     has_content: false,
+                    content_hash: None,
+                    integrity_ok: None,
                 },
                 SkillVersion {
                     version: "2.0.0".to_string(),
@@ -606,10 +678,69 @@ required = true
                     files: std::collections::HashMap::new(),
                     published: Some("2026-02-01T00:00:00Z".to_string()),
                     has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
                 },
             ],
         };
 
         assert!(entry.latest().is_none());
+    }
+
+    #[test]
+    fn test_load_with_manifest_verified() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // code-review has a correct MANIFEST.sha256
+        let entry = index
+            .skills
+            .get(&("joshrotenberg".to_string(), "code-review".to_string()))
+            .expect("code-review should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        assert!(latest.content_hash.is_some());
+        assert_eq!(latest.integrity_ok, Some(true));
+    }
+
+    #[test]
+    fn test_load_with_manifest_mismatch() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // git-conventions has a deliberately corrupted MANIFEST.sha256
+        let entry = index
+            .skills
+            .get(&("acme".to_string(), "git-conventions".to_string()))
+            .expect("git-conventions should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        assert!(latest.content_hash.is_some());
+        assert_eq!(latest.integrity_ok, Some(false));
+    }
+
+    #[test]
+    fn test_load_without_manifest() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // skillet/setup has no MANIFEST.sha256
+        let entry = index
+            .skills
+            .get(&("skillet".to_string(), "setup".to_string()))
+            .expect("skillet/setup should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        assert!(latest.content_hash.is_some());
+        assert_eq!(latest.integrity_ok, None);
     }
 }

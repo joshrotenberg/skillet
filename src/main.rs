@@ -5,6 +5,7 @@
 
 mod git;
 mod index;
+mod integrity;
 mod resources;
 mod state;
 mod tools;

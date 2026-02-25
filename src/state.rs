@@ -124,6 +124,11 @@ pub struct SkillVersion {
     /// Whether this version's content is loaded from disk.
     /// Historical versions listed in versions.toml have `has_content = false`.
     pub has_content: bool,
+    /// Computed composite content hash (SHA256 of all files)
+    pub content_hash: Option<String>,
+    /// Integrity verification result: None if no manifest, Some(true) if
+    /// verified, Some(false) if mismatch detected
+    pub integrity_ok: Option<bool>,
 }
 
 /// Deserialized versions.toml manifest
@@ -226,6 +231,12 @@ pub struct SkillSummary {
     pub version_count: usize,
     /// All available (non-yanked) version strings, oldest first
     pub available_versions: Vec<String>,
+    /// Composite content hash of the latest version
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_hash: Option<String>,
+    /// Integrity verification status: "verified", "failed", or absent
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<String>,
 }
 
 impl SkillSummary {
@@ -242,6 +253,12 @@ impl SkillSummary {
             .filter(|v| !v.yanked)
             .map(|v| v.version.clone())
             .collect();
+        let integrity = match v.integrity_ok {
+            Some(true) => Some("verified".to_string()),
+            Some(false) => Some("failed".to_string()),
+            None => None,
+        };
+
         Some(Self {
             owner: entry.owner.clone(),
             name: entry.name.clone(),
@@ -257,6 +274,8 @@ impl SkillSummary {
             published: v.published.clone(),
             version_count: entry.versions.len(),
             available_versions,
+            content_hash: v.content_hash.clone(),
+            integrity,
         })
     }
 }
