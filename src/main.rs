@@ -15,6 +15,9 @@ use clap::{Parser, Subcommand};
 use tower_mcp::transport::http::HttpTransport;
 use tower_mcp::{McpRouter, StdioTransport};
 
+use skillet_mcp::config;
+use skillet_mcp::install::{self, InstallOptions};
+use skillet_mcp::manifest;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
 use skillet_mcp::{git, index, pack, publish, registry, search, state, validate};
@@ -44,6 +47,14 @@ enum Command {
     Publish(PublishArgs),
     /// Initialize a new skill registry
     InitRegistry(InitRegistryArgs),
+    /// Install a skill from a registry
+    Install(InstallArgs),
+    /// Search for skills in registries
+    Search(SearchArgs),
+    /// Show detailed information about a skill
+    Info(InfoArgs),
+    /// List installed skills
+    List(ListArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -118,6 +129,76 @@ struct PublishArgs {
     dry_run: bool,
 }
 
+/// Shared registry source arguments for CLI subcommands.
+#[derive(clap::Args, Debug, Clone)]
+struct RegistryArgs {
+    /// Path to a local registry directory (can be specified multiple times)
+    #[arg(long)]
+    registry: Vec<PathBuf>,
+
+    /// Git URL to clone/pull the registry from (can be specified multiple times)
+    #[arg(long)]
+    remote: Vec<String>,
+
+    /// Subdirectory within registries that contains the skills
+    #[arg(long)]
+    subdir: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Debug)]
+struct InstallArgs {
+    /// Skill to install in owner/name format
+    skill: String,
+
+    /// Install target (agents, claude, cursor, copilot, windsurf, gemini, all)
+    #[arg(long)]
+    target: Vec<String>,
+
+    /// Install globally instead of into the current project
+    #[arg(long)]
+    global: bool,
+
+    /// Install a specific version (default: latest)
+    #[arg(long)]
+    version: Option<String>,
+
+    #[command(flatten)]
+    registries: RegistryArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct SearchArgs {
+    /// Search query (or "*" for all skills)
+    query: String,
+
+    /// Filter by category
+    #[arg(long)]
+    category: Option<String>,
+
+    /// Filter by tag
+    #[arg(long)]
+    tag: Option<String>,
+
+    #[command(flatten)]
+    registries: RegistryArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct InfoArgs {
+    /// Skill to show in owner/name format
+    skill: String,
+
+    #[command(flatten)]
+    registries: RegistryArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct ListArgs {
+    /// List installed skills (default behavior)
+    #[arg(long, default_value_t = true)]
+    installed: bool,
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -127,6 +208,10 @@ async fn main() -> ExitCode {
         Some(Command::Pack(args)) => run_pack(args),
         Some(Command::Publish(args)) => run_publish(args),
         Some(Command::InitRegistry(args)) => run_init_registry(args),
+        Some(Command::Install(args)) => run_install(args),
+        Some(Command::Search(args)) => run_search(args),
+        Some(Command::Info(args)) => run_info(args),
+        Some(Command::List(args)) => run_list(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     }
@@ -307,6 +392,437 @@ fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
     println!("  # add skills: mkdir -p owner/skill-name");
     println!("  # serve locally: skillet --registry .");
     println!("  # push and serve remotely: skillet --remote <git-url>");
+
+    ExitCode::SUCCESS
+}
+
+/// Parse an "owner/name" skill reference.
+fn parse_skill_ref(s: &str) -> Result<(&str, &str), String> {
+    let parts: Vec<&str> = s.splitn(2, '/').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return Err(format!(
+            "Invalid skill reference: '{s}'. Expected format: owner/name"
+        ));
+    }
+    Ok((parts[0], parts[1]))
+}
+
+/// Run the `install` subcommand.
+fn run_install(args: InstallArgs) -> ExitCode {
+    let (owner, name) = match parse_skill_ref(&args.skill) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let cli_config = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let targets = match config::resolve_targets(&args.target, &cli_config) {
+        Ok(t) => t,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let global = args.global || cli_config.install.global;
+
+    let (skill_index, registry_paths) = match registry::load_registries(
+        &args.registries.registry,
+        &args.registries.remote,
+        &cli_config,
+        args.registries.subdir.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading registries: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    // Look up the skill
+    let entry = match skill_index
+        .skills
+        .get(&(owner.to_string(), name.to_string()))
+    {
+        Some(e) => e,
+        None => {
+            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            return ExitCode::from(1);
+        }
+    };
+
+    // Resolve version
+    let version = if let Some(ref requested) = args.version {
+        match entry.versions.iter().find(|v| v.version == *requested) {
+            Some(v) if !v.has_content => {
+                eprintln!(
+                    "Error: version {requested} exists but content is not available \
+                     (only the latest version has full content)"
+                );
+                return ExitCode::from(1);
+            }
+            Some(v) => v,
+            None => {
+                let available: Vec<&str> =
+                    entry.versions.iter().map(|v| v.version.as_str()).collect();
+                eprintln!(
+                    "Error: version '{requested}' not found for {owner}/{name}\n\
+                     Available versions: {}",
+                    available.join(", ")
+                );
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        match entry.latest() {
+            Some(v) => v,
+            None => {
+                eprintln!("Error: no available versions for {owner}/{name} (all yanked)");
+                return ExitCode::from(1);
+            }
+        }
+    };
+
+    // Load manifest
+    let mut installed_manifest = match manifest::load() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error loading installation manifest: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    // Determine registry identifier
+    let registry_id = if !registry_paths.is_empty() {
+        registry::registry_id(&registry_paths[0], &args.registries.remote)
+    } else {
+        "unknown".to_string()
+    };
+
+    let options = InstallOptions {
+        targets,
+        global,
+        registry: registry_id,
+    };
+
+    let results =
+        match install::install_skill(owner, name, version, &options, &mut installed_manifest) {
+            Ok(r) => r,
+            Err(e) => {
+                eprintln!("Error installing skill: {e}");
+                return ExitCode::from(1);
+            }
+        };
+
+    // Save manifest
+    if let Err(e) = manifest::save(&installed_manifest) {
+        eprintln!("Error saving installation manifest: {e}");
+        return ExitCode::from(1);
+    }
+
+    // Print results
+    println!(
+        "Installed {owner}/{name} v{version}",
+        version = version.version
+    );
+    println!();
+    for r in &results {
+        let file_count = r.files_written.len();
+        let scope = if options.global { "global" } else { "project" };
+        println!(
+            "  {target} ({scope}) ... {file_count} file{s} -> {path}",
+            target = r.target,
+            s = if file_count == 1 { "" } else { "s" },
+            path = r.path.display(),
+        );
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Run the `search` subcommand.
+fn run_search(args: SearchArgs) -> ExitCode {
+    let cli_config = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let (skill_index, _registry_paths) = match registry::load_registries(
+        &args.registries.registry,
+        &args.registries.remote,
+        &cli_config,
+        args.registries.subdir.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading registries: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let skill_search = search::SkillSearch::build(&skill_index);
+
+    // Wildcard: list all skills
+    let results: Vec<state::SkillSummary> = if args.query == "*" {
+        let mut keys: Vec<_> = skill_index.skills.keys().collect();
+        keys.sort();
+        keys.iter()
+            .filter_map(|k| {
+                let entry = skill_index.skills.get(*k)?;
+                state::SkillSummary::from_entry(entry)
+            })
+            .collect()
+    } else {
+        let hits = skill_search.search(&args.query, 20);
+        hits.iter()
+            .filter_map(|(owner, name, _score)| {
+                let entry = skill_index.skills.get(&(owner.clone(), name.clone()))?;
+                state::SkillSummary::from_entry(entry)
+            })
+            .collect()
+    };
+
+    // Apply structured filters
+    let results: Vec<_> = results
+        .into_iter()
+        .filter(|s| {
+            if let Some(ref cat) = args.category
+                && !s.categories.iter().any(|c| c.eq_ignore_ascii_case(cat))
+            {
+                return false;
+            }
+            if let Some(ref tag) = args.tag
+                && !s.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+            {
+                return false;
+            }
+            true
+        })
+        .collect();
+
+    if results.is_empty() {
+        println!("No skills found.");
+        return ExitCode::SUCCESS;
+    }
+
+    println!(
+        "Found {} skill{}:\n",
+        results.len(),
+        if results.len() == 1 { "" } else { "s" }
+    );
+    for s in &results {
+        println!("  {}/{} v{}", s.owner, s.name, s.version);
+        println!("    {}", s.description);
+        if !s.categories.is_empty() {
+            println!("    categories: {}", s.categories.join(", "));
+        }
+        if !s.tags.is_empty() {
+            println!("    tags: {}", s.tags.join(", "));
+        }
+        println!();
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Run the `info` subcommand.
+fn run_info(args: InfoArgs) -> ExitCode {
+    let (owner, name) = match parse_skill_ref(&args.skill) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let cli_config = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let (skill_index, _registry_paths) = match registry::load_registries(
+        &args.registries.registry,
+        &args.registries.remote,
+        &cli_config,
+        args.registries.subdir.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading registries: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let entry = match skill_index
+        .skills
+        .get(&(owner.to_string(), name.to_string()))
+    {
+        Some(e) => e,
+        None => {
+            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            return ExitCode::from(1);
+        }
+    };
+
+    let latest = match entry.latest() {
+        Some(v) => v,
+        None => {
+            eprintln!("Error: no available versions for {owner}/{name} (all yanked)");
+            return ExitCode::from(1);
+        }
+    };
+
+    let info = &latest.metadata.skill;
+
+    println!("{owner}/{name}\n");
+    println!("  version ............... {}", info.version);
+    println!("  description ........... {}", info.description);
+
+    if let Some(ref trigger) = info.trigger {
+        println!("  trigger ............... {trigger}");
+    }
+    if let Some(ref license) = info.license {
+        println!("  license ............... {license}");
+    }
+    if let Some(ref author) = info.author {
+        if let Some(ref name) = author.name {
+            println!("  author ................ {name}");
+        }
+        if let Some(ref github) = author.github {
+            println!("  github ................ {github}");
+        }
+    }
+    if let Some(ref classification) = info.classification {
+        if !classification.categories.is_empty() {
+            println!(
+                "  categories ............ {}",
+                classification.categories.join(", ")
+            );
+        }
+        if !classification.tags.is_empty() {
+            println!(
+                "  tags .................. {}",
+                classification.tags.join(", ")
+            );
+        }
+    }
+    if let Some(ref compat) = info.compatibility
+        && !compat.verified_with.is_empty()
+    {
+        println!(
+            "  verified with ......... {}",
+            compat.verified_with.join(", ")
+        );
+    }
+
+    // Extra files
+    if !latest.files.is_empty() {
+        let mut file_paths: Vec<&String> = latest.files.keys().collect();
+        file_paths.sort();
+        println!(
+            "  files ................. {}",
+            file_paths
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    // Published timestamp
+    if let Some(ref published) = latest.published {
+        println!("  published ............. {published}");
+    }
+
+    // Content hash
+    if let Some(ref hash) = latest.content_hash {
+        let display = if hash.len() > 17 {
+            format!("{}...", &hash[..17])
+        } else {
+            hash.clone()
+        };
+        println!("  content hash .......... {display}");
+    }
+
+    // Integrity
+    match latest.integrity_ok {
+        Some(true) => println!("  integrity ............. verified"),
+        Some(false) => println!("  integrity ............. MISMATCH"),
+        None => {}
+    }
+
+    // Version history
+    let available: Vec<&str> = entry
+        .versions
+        .iter()
+        .filter(|v| !v.yanked)
+        .map(|v| v.version.as_str())
+        .collect();
+    if available.len() > 1 {
+        println!("  versions .............. {}", available.join(", "));
+    }
+
+    ExitCode::SUCCESS
+}
+
+/// Run the `list` subcommand.
+fn run_list(_args: ListArgs) -> ExitCode {
+    let installed_manifest = match manifest::load() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error loading installation manifest: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if installed_manifest.skills.is_empty() {
+        println!("No skills installed.");
+        return ExitCode::SUCCESS;
+    }
+
+    // Group by (owner, name)
+    let mut groups: std::collections::BTreeMap<(String, String), Vec<&manifest::InstalledSkill>> =
+        std::collections::BTreeMap::new();
+    for skill in &installed_manifest.skills {
+        groups
+            .entry((skill.owner.clone(), skill.name.clone()))
+            .or_default()
+            .push(skill);
+    }
+
+    println!(
+        "{} skill{} installed:\n",
+        groups.len(),
+        if groups.len() == 1 { "" } else { "s" }
+    );
+
+    for ((owner, name), entries) in &groups {
+        let version = &entries[0].version;
+        println!("  {owner}/{name} v{version}");
+        for entry in entries {
+            println!(
+                "    -> {}  ({})",
+                entry.installed_to.display(),
+                entry.installed_at,
+            );
+        }
+        println!();
+    }
 
     ExitCode::SUCCESS
 }

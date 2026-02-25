@@ -4,6 +4,7 @@ use std::path::Path;
 
 use anyhow::Context;
 
+use crate::config;
 use crate::integrity;
 use crate::state::{VersionRecord, VersionsManifest};
 use crate::validate::{self, ValidationResult};
@@ -91,33 +92,7 @@ fn update_versions_toml(dir: &Path, validation: &ValidationResult) -> anyhow::Re
 
 /// Current time as ISO 8601 string (UTC).
 fn now_iso8601() -> String {
-    // Use std::time to avoid adding a chrono dependency
-    let now = std::time::SystemTime::now();
-    let duration = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let secs = duration.as_secs();
-
-    // Convert to date-time components manually
-    let days = secs / 86400;
-    let time_of_day = secs % 86400;
-    let hours = time_of_day / 3600;
-    let minutes = (time_of_day % 3600) / 60;
-    let seconds = time_of_day % 60;
-
-    // Civil date from days since epoch (algorithm from Howard Hinnant)
-    let z = days as i64 + 719468;
-    let era = if z >= 0 { z } else { z - 146096 } / 146097;
-    let doe = (z - era * 146097) as u64;
-    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
-    let y = yoe as i64 + era * 400;
-    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
-    let mp = (5 * doy + 2) / 153;
-    let d = doy - (153 * mp + 2) / 5 + 1;
-    let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = if m <= 2 { y + 1 } else { y };
-
-    format!("{y:04}-{m:02}-{d:02}T{hours:02}:{minutes:02}:{seconds:02}Z")
+    config::now_iso8601()
 }
 
 #[cfg(test)]
