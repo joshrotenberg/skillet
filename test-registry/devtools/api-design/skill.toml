@@ -1,0 +1,23 @@
+[skill]
+name = "api-design"
+owner = "devtools"
+version = "1.2.0"
+description = "REST and gRPC API design guidelines with OpenAPI patterns"
+trigger = "Use when designing, implementing, or reviewing HTTP APIs or gRPC services"
+license = "Apache-2.0"
+
+[skill.author]
+name = "DevTools Collective"
+github = "devtools"
+
+[skill.classification]
+categories = ["development", "api"]
+tags = ["api", "rest", "grpc", "openapi", "http", "design"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

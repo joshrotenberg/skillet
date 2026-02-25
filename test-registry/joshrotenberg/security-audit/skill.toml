@@ -1,0 +1,23 @@
+[skill]
+name = "security-audit"
+owner = "joshrotenberg"
+version = "1.0.0"
+description = "Security audit checklist for web applications and APIs"
+trigger = "Use when reviewing code for security issues, hardening an application, or performing a security audit"
+license = "MIT"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["security", "review"]
+tags = ["security", "owasp", "audit", "vulnerabilities", "hardening"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 8192
+required_tools = ["bash", "read", "grep"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6"]

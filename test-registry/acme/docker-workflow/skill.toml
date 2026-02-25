@@ -1,0 +1,23 @@
+[skill]
+name = "docker-workflow"
+owner = "acme"
+version = "2.0.0"
+description = "Docker containerization best practices and multi-stage build patterns"
+trigger = "Use when writing Dockerfiles, docker-compose configs, or containerizing applications"
+license = "MIT"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["devops", "docker"]
+tags = ["docker", "dockerfile", "containers", "multi-stage", "docker-compose"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["bash", "read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

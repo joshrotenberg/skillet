@@ -1,0 +1,23 @@
+[skill]
+name = "typescript-dev"
+owner = "joshrotenberg"
+version = "2026.02.01"
+description = "TypeScript development standards with strict mode and modern patterns"
+trigger = "Use when writing or reviewing TypeScript code"
+license = "MIT"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["development", "typescript"]
+tags = ["typescript", "eslint", "vitest", "strict", "type-safety"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_tools = ["bash", "read", "write", "edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
