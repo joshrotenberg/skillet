@@ -1,21 +1,49 @@
 # skillet
 
-A skill registry for AI agents, served over MCP.
+A skill registry toolkit for AI agents.
 
 ## What is this
 
 AI agent skills (structured prompts that guide agent behavior) are scattered
 across GitHub repos, npm packages, and copy-paste threads. There's no
-standard way to discover or distribute them at runtime. Skillet is an MCP
-server that gives agents searchable, categorized access to a skill registry.
-Connect it, search for what you need, and use skills inline -- no
-installation step, no package manager, no build process. Skills follow the
+standard way to discover or distribute them at runtime.
+
+Skillet is a toolkit for building and serving skill registries. Create your
+own registry, publish skills to it, and serve it to agents over MCP -- or
+use the CLI directly. Skills follow the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills)
 and work standalone in `.claude/skills/` or any compatible agent.
 
+Think of it like git: the tool is the thing, registries are distributed.
+
 ## Quick start
 
-Add skillet to your MCP configuration to connect to a remote registry:
+### Create a registry
+
+```bash
+skillet init-registry my-skills
+cd my-skills
+```
+
+This scaffolds a git repo with the right structure. Add skills as
+`owner/skill-name/` directories, each with a `skill.toml` and `SKILL.md`.
+
+### Serve it
+
+As an MCP server (add to your agent's MCP config):
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet",
+      "args": ["--registry", "/path/to/my-skills"]
+    }
+  }
+}
+```
+
+From a remote git repo:
 
 ```json
 {
@@ -30,8 +58,23 @@ Add skillet to your MCP configuration to connect to a remote registry:
 }
 ```
 
-Once connected, agents discover and use skills through normal MCP
-tool calls. Here's what that looks like in practice:
+Combine multiple registries (local and remote, first match wins):
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet",
+      "args": [
+        "--registry", "/path/to/my-skills",
+        "--remote", "https://github.com/joshrotenberg/skillet-registry.git"
+      ]
+    }
+  }
+}
+```
+
+### What it looks like
 
 ```
 User: Set up a new Rust project with CI
@@ -115,31 +158,35 @@ Skillet provides a three-step pipeline for publishing skills to a registry:
 2. `skillet pack <path>` -- validate, generate content manifest, update version history
 3. `skillet publish <path> --repo <owner/repo>` -- pack and open a PR against the registry
 
-## Running the server
+## CLI reference
 
 ```
-skillet [OPTIONS]
+skillet [serve] [OPTIONS]
 skillet validate <PATH>
 skillet pack <PATH>
 skillet publish <PATH> --repo <OWNER/REPO> [--dry-run]
+skillet init-registry <PATH> [--name <NAME>]
 ```
 
 Server options:
 
 | Flag | Description |
 |---|---|
-| `--registry <path>` | Path to a local registry directory |
-| `--remote <url>` | Git URL to clone and serve from |
-| `--refresh-interval <duration>` | How often to pull from remote (default: `5m`, `0` to disable) |
+| `--registry <path>` | Local registry directory (repeatable) |
+| `--remote <url>` | Git URL to clone and serve from (repeatable) |
+| `--refresh-interval <duration>` | How often to pull from remotes (default: `5m`, `0` to disable) |
 | `--cache-dir <path>` | Directory to clone remote registries into |
-| `--subdir <path>` | Subdirectory within registry containing skills |
-| `--watch` | Watch local registry for changes and auto-reload |
+| `--subdir <path>` | Subdirectory within registries containing skills |
+| `--watch` | Watch local registries for changes and auto-reload |
+| `--http <addr>` | Serve over HTTP instead of stdio (e.g. `0.0.0.0:8080`) |
 | `--log-level <level>` | Log level (default: `info`) |
+
+## Installation
 
 Building from source:
 
 ```
-cargo build --release
+cargo install --git https://github.com/joshrotenberg/grimoire.git
 ```
 
 Requires Rust 1.90 or later.
@@ -147,10 +194,10 @@ Requires Rust 1.90 or later.
 ## Status
 
 Working prototype. The skill schema is stable, the MCP interface is
-functional, and the [default registry](https://github.com/joshrotenberg/skillet-registry)
-has 11 skills across development, devops, and security categories. The
-registry format follows the same principles as crates.io -- flat files,
-git-backed, auditable history.
+functional, and there's a
+[sample registry](https://github.com/joshrotenberg/skillet-registry)
+with skills across development, devops, and security categories. The
+registry format is flat files, git-backed, with auditable history.
 
 See [issues](https://github.com/joshrotenberg/grimoire/issues) for the
 roadmap.
