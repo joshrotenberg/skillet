@@ -11,12 +11,14 @@ mod resources;
 mod search;
 mod state;
 mod tools;
+mod validate;
 
 use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use tower_mcp::{McpRouter, StdioTransport};
 
 use crate::state::AppState;
@@ -24,7 +26,26 @@ use crate::state::AppState;
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
 #[command(about = "MCP-native skill registry for AI agents")]
-struct Args {
+#[command(args_conflicts_with_subcommands = true)]
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Command>,
+
+    /// Top-level serve args for backward compat (no subcommand = implicit serve)
+    #[command(flatten)]
+    serve: ServeArgs,
+}
+
+#[derive(Subcommand, Debug)]
+enum Command {
+    /// Run the MCP server (default when no subcommand is given)
+    Serve(ServeArgs),
+    /// Validate a skillpack directory
+    Validate(ValidateArgs),
+}
+
+#[derive(clap::Args, Debug, Clone)]
+struct ServeArgs {
     /// Path to a local registry directory (contains owner/skill-name/ directories)
     #[arg(long, group = "source")]
     registry: Option<PathBuf>,
@@ -49,6 +70,12 @@ struct Args {
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct ValidateArgs {
+    /// Path to the skillpack directory to validate
+    path: PathBuf,
 }
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
@@ -105,19 +132,133 @@ fn default_cache_dir() -> PathBuf {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), tower_mcp::BoxError> {
-    let args = Args::parse();
+async fn main() -> ExitCode {
+    let cli = Cli::parse();
 
+    match cli.command {
+        Some(Command::Validate(args)) => run_validate(args),
+        Some(Command::Serve(args)) => run_serve(args).await,
+        None => run_serve(cli.serve).await,
+    }
+}
+
+/// Run the `validate` subcommand.
+///
+/// Validates a skillpack directory and prints human-readable results.
+/// Returns exit code 0 on success, 1 on validation failure.
+fn run_validate(args: ValidateArgs) -> ExitCode {
+    let path = &args.path;
+    println!("Validating {} ...\n", path.display());
+
+    let result = match validate::validate_skillpack(path) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("  error: {e}");
+            eprintln!("\nValidation failed.");
+            return ExitCode::from(1);
+        }
+    };
+
+    // skill.toml
+    println!("  skill.toml ............ ok");
+
+    // SKILL.md
+    let line_count = result.skill_md.lines().count();
+    println!("  SKILL.md .............. ok ({line_count} lines)");
+
+    // Core fields
+    println!("  owner ................. {}", result.owner);
+    println!("  name .................. {}", result.name);
+    println!("  version ............... {}", result.version);
+    println!("  description ........... {}", result.description);
+
+    // Categories and tags
+    if let Some(ref classification) = result.metadata.skill.classification {
+        if !classification.categories.is_empty() {
+            println!(
+                "  categories ............ {}",
+                classification.categories.join(", ")
+            );
+        }
+        if !classification.tags.is_empty() {
+            println!(
+                "  tags .................. {}",
+                classification.tags.join(", ")
+            );
+        }
+    }
+
+    // Extra files
+    if !result.files.is_empty() {
+        let mut file_paths: Vec<&String> = result.files.keys().collect();
+        file_paths.sort();
+        println!(
+            "  extra files ........... {}",
+            file_paths
+                .iter()
+                .map(|s| s.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+
+    // Content hash (show abbreviated)
+    let hash_display = if result.hashes.composite.len() > 17 {
+        format!("{}...", &result.hashes.composite[..17])
+    } else {
+        result.hashes.composite.clone()
+    };
+    println!("  content hash .......... {hash_display}");
+
+    // Manifest status
+    match result.manifest_ok {
+        Some(true) => println!("  manifest .............. verified"),
+        Some(false) => println!("  manifest .............. MISMATCH"),
+        None => println!("  manifest .............. not found (will be generated on publish)"),
+    }
+
+    // Warnings
+    if !result.warnings.is_empty() {
+        println!();
+        for w in &result.warnings {
+            println!("  warning: {w}");
+        }
+    }
+
+    println!("\nValidation passed.");
+    ExitCode::SUCCESS
+}
+
+/// Run the MCP server (default behavior / `serve` subcommand).
+async fn run_serve(args: ServeArgs) -> ExitCode {
     // Initialize tracing
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive(format!("skillet={}", args.log_level).parse()?)
-                .add_directive(format!("tower_mcp={}", args.log_level).parse()?),
+                .add_directive(
+                    format!("skillet={}", args.log_level)
+                        .parse()
+                        .expect("valid log directive"),
+                )
+                .add_directive(
+                    format!("tower_mcp={}", args.log_level)
+                        .parse()
+                        .expect("valid log directive"),
+                ),
         )
         .with_writer(std::io::stderr)
         .init();
 
+    match run_serve_inner(args).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     // Determine the registry path
     let registry_path = match (&args.registry, &args.remote) {
         (Some(path), None) => path.clone(),

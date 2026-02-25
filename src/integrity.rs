@@ -102,7 +102,7 @@ pub fn parse_manifest(content: &str) -> anyhow::Result<ContentHashes> {
 /// Write a `ContentHashes` to `MANIFEST.sha256` format.
 ///
 /// Composite hash first (with `*` path), then files sorted alphabetically.
-/// Currently used in tests and will be used by `publish_skill` in the future.
+/// Used by `publish_skill` and `validate --generate-manifest` (future).
 #[cfg(test)]
 pub fn format_manifest(hashes: &ContentHashes) -> String {
     let mut out = String::new();

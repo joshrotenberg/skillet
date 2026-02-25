@@ -14,6 +14,7 @@ use crate::state::{
     RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion,
     VersionsManifest,
 };
+use crate::validate;
 
 /// Load registry configuration from `config.toml` at the registry root.
 ///
@@ -137,6 +138,10 @@ pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
 
 /// Load a single skill from its directory.
 ///
+/// Uses `validate::validate_skillpack()` for core parsing and validation,
+/// then layers on registry-specific checks (owner/name match directory
+/// structure, versions.toml handling).
+///
 /// If `versions.toml` exists, builds a multi-version `SkillEntry` with one
 /// `SkillVersion` per record. Only the latest version (last entry) has full
 /// content loaded from disk; historical versions are placeholders with
@@ -144,57 +149,40 @@ pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
 ///
 /// Without `versions.toml`, behaves exactly as before (single version).
 fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry> {
-    let toml_path = dir.join("skill.toml");
-    let md_path = dir.join("SKILL.md");
+    let validated = validate::validate_skillpack(dir)?;
 
-    let skill_toml_raw = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("Failed to read {}", toml_path.display()))?;
-
-    let skill_md = std::fs::read_to_string(&md_path)
-        .with_context(|| format!("Failed to read {}", md_path.display()))?;
-
-    let metadata: SkillMetadata = toml::from_str(&skill_toml_raw)
-        .with_context(|| format!("Failed to parse {}", toml_path.display()))?;
-
-    // Validate owner/name match directory structure
-    if metadata.skill.owner != owner {
+    // Registry-specific: owner/name must match directory structure
+    if validated.owner != owner {
         bail!(
             "Owner mismatch: skill.toml says '{}' but directory is '{}'",
-            metadata.skill.owner,
+            validated.owner,
             owner
         );
     }
-    if metadata.skill.name != name {
+    if validated.name != name {
         bail!(
             "Name mismatch: skill.toml says '{}' but directory is '{}'",
-            metadata.skill.name,
+            validated.name,
             name
         );
     }
 
-    // Collect extra files from scripts/, references/, assets/
-    let files = load_extra_files(dir)?;
-
     let versions_path = dir.join("versions.toml");
     let versions = if versions_path.is_file() {
-        load_versions_manifest(&versions_path, &metadata)?
+        load_versions_manifest(&versions_path, &validated.metadata)?
     } else {
-        // Compute content hashes
-        let computed = integrity::compute_hashes(&skill_toml_raw, &skill_md, &files);
-        let (content_hash, integrity_ok) = verify_manifest(dir, &computed);
-
         // Single-version backward compat
         vec![SkillVersion {
-            version: metadata.skill.version.clone(),
-            metadata,
-            skill_md,
-            skill_toml_raw,
+            version: validated.version,
+            metadata: validated.metadata,
+            skill_md: validated.skill_md,
+            skill_toml_raw: validated.skill_toml_raw,
             yanked: false,
-            files,
+            files: validated.files,
             published: None,
             has_content: true,
-            content_hash: Some(content_hash),
-            integrity_ok,
+            content_hash: Some(validated.hashes.composite),
+            integrity_ok: validated.manifest_ok,
         }]
     };
 
@@ -358,10 +346,10 @@ fn verify_manifest(
 }
 
 /// Allowed subdirectories in a skillpack (per Agent Skills spec)
-const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets"];
+pub const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets"];
 
-/// Load extra files from scripts/, references/, and assets/ subdirectories
-fn load_extra_files(
+/// Load extra files from scripts/, references/, and assets/ subdirectories.
+pub fn load_extra_files(
     skill_dir: &Path,
 ) -> anyhow::Result<std::collections::HashMap<String, SkillFile>> {
     let mut files = std::collections::HashMap::new();
@@ -405,8 +393,8 @@ fn load_extra_files(
     Ok(files)
 }
 
-/// Simple mime type guessing based on file extension
-fn guess_mime_type(filename: &str) -> String {
+/// Simple mime type guessing based on file extension.
+pub fn guess_mime_type(filename: &str) -> String {
     match filename.rsplit('.').next() {
         Some("md") => "text/markdown",
         Some("sh" | "bash") => "text/x-shellscript",
