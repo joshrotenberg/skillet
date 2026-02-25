@@ -7,7 +7,7 @@ use tower_mcp::{
     extract::{Json, State},
 };
 
-use crate::state::AppState;
+use skillet_mcp::state::AppState;
 
 pub fn build(state: Arc<AppState>) -> Tool {
     ToolBuilder::new("list_categories")

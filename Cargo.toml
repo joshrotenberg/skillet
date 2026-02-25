@@ -10,6 +10,10 @@ repository = "https://github.com/joshrotenberg/grimoire"
 keywords = ["mcp", "skills", "ai-agents", "registry"]
 categories = ["development-tools", "command-line-utilities"]
 
+[lib]
+name = "skillet_mcp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "skillet"
 path = "src/main.rs"
