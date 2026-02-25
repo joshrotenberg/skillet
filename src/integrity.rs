@@ -103,7 +103,6 @@ pub fn parse_manifest(content: &str) -> anyhow::Result<ContentHashes> {
 ///
 /// Composite hash first (with `*` path), then files sorted alphabetically.
 /// Used by `publish_skill` and `validate --generate-manifest` (future).
-#[cfg(test)]
 pub fn format_manifest(hashes: &ContentHashes) -> String {
     let mut out = String::new();
     out.push_str(&format!("{}  *\n", hashes.composite));

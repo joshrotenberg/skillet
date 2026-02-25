@@ -142,13 +142,13 @@ pub struct SkillVersion {
 }
 
 /// Deserialized versions.toml manifest
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionsManifest {
     pub versions: Vec<VersionRecord>,
 }
 
 /// A single version record from versions.toml
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VersionRecord {
     pub version: String,
     pub published: String,
