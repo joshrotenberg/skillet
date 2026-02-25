@@ -3,10 +3,12 @@
 //! An MCP-native skill registry for AI agents. Serves skills from a local
 //! registry directory (git checkout) via tools and resource templates.
 
+mod bm25;
 mod git;
 mod index;
 mod integrity;
 mod resources;
+mod search;
 mod state;
 mod tools;
 
@@ -147,7 +149,8 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
     // Load registry config and skill index
     let config = index::load_config(&registry_path)?;
     let skill_index = index::load_index(&registry_path)?;
-    let state = AppState::new(registry_path, skill_index, config);
+    let skill_search = search::SkillSearch::build(&skill_index);
+    let state = AppState::new(registry_path, skill_index, skill_search, config);
 
     // Spawn background refresh task if using a remote
     if let Some(url) = args.remote {
@@ -248,8 +251,11 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
 
             match result {
                 Ok(Ok(Some(new_index))) => {
+                    let new_search = search::SkillSearch::build(&new_index);
                     let mut idx = state.index.write().await;
+                    let mut srch = state.search.write().await;
                     *idx = new_index;
+                    *srch = new_search;
                     tracing::info!(url = %url, "Index refreshed from remote");
                 }
                 Ok(Ok(None)) => {
