@@ -21,6 +21,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use tower_mcp::transport::http::HttpTransport;
 use tower_mcp::{McpRouter, StdioTransport};
 
 use crate::state::AppState;
@@ -76,6 +77,10 @@ struct ServeArgs {
     /// Watch the local registry directory for changes and auto-reload
     #[arg(long)]
     watch: bool,
+
+    /// Serve over HTTP instead of stdio (e.g. "0.0.0.0:8080")
+    #[arg(long)]
+    http: Option<String>,
 
     /// Log level
     #[arg(short, long, default_value = "info")]
@@ -457,8 +462,16 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
 
     let router = build_router(state);
 
-    tracing::info!("Serving over stdio");
-    StdioTransport::new(router).run().await?;
+    if let Some(addr) = args.http {
+        tracing::info!(addr = %addr, "Serving over HTTP");
+        HttpTransport::new(router)
+            .disable_origin_validation()
+            .serve(&addr)
+            .await?;
+    } else {
+        tracing::info!("Serving over stdio");
+        StdioTransport::new(router).run().await?;
+    }
 
     Ok(())
 }
