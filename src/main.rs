@@ -53,15 +53,15 @@ enum Command {
 
 #[derive(clap::Args, Debug, Clone)]
 struct ServeArgs {
-    /// Path to a local registry directory (contains owner/skill-name/ directories)
-    #[arg(long, group = "source")]
-    registry: Option<PathBuf>,
+    /// Path to a local registry directory (can be specified multiple times)
+    #[arg(long)]
+    registry: Vec<PathBuf>,
 
-    /// Git URL to clone/pull the registry from
-    #[arg(long, group = "source")]
-    remote: Option<String>,
+    /// Git URL to clone/pull the registry from (can be specified multiple times)
+    #[arg(long)]
+    remote: Vec<String>,
 
-    /// How often to pull from the remote (e.g. "5m", "1h", "0" to disable).
+    /// How often to pull from remotes (e.g. "5m", "1h", "0" to disable).
     /// Only used with --remote.
     #[arg(long, default_value = "5m")]
     refresh_interval: String,
@@ -70,11 +70,11 @@ struct ServeArgs {
     #[arg(long)]
     cache_dir: Option<PathBuf>,
 
-    /// Subdirectory within the registry (local or remote) that contains the skills
+    /// Subdirectory within registries that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
 
-    /// Watch the local registry directory for changes and auto-reload
+    /// Watch local registry directories for changes and auto-reload
     #[arg(long)]
     watch: bool,
 
@@ -413,44 +413,61 @@ async fn run_serve(args: ServeArgs) -> ExitCode {
 }
 
 async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
-    // Determine the registry path
-    let registry_path = match (&args.registry, &args.remote) {
-        (Some(path), None) => path.clone(),
-        (None, Some(url)) => {
-            let base = args.cache_dir.unwrap_or_else(default_cache_dir);
-            let target = cache_dir_for_url(&base, url);
+    let cache_base = args.cache_dir.unwrap_or_else(default_cache_dir);
+    let mut registry_paths = Vec::new();
 
-            if let Some(parent) = target.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
+    // Resolve local registries
+    for path in &args.registry {
+        let path = match &args.subdir {
+            Some(sub) => path.join(sub),
+            None => path.clone(),
+        };
+        tracing::info!(registry = %path.display(), "Adding local registry");
+        registry_paths.push(path);
+    }
 
-            git::clone_or_pull(url, &target)?;
-            target
+    // Resolve remote registries (clone/pull)
+    for url in &args.remote {
+        let target = cache_dir_for_url(&cache_base, url);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
         }
-        (None, None) => {
-            // Default to local test-registry for development
-            PathBuf::from("test-registry")
+        git::clone_or_pull(url, &target)?;
+        let path = match &args.subdir {
+            Some(sub) => target.join(sub),
+            None => target,
+        };
+        tracing::info!(registry = %path.display(), remote = %url, "Adding remote registry");
+        registry_paths.push(path);
+    }
+
+    // Default to local test-registry if nothing specified
+    if registry_paths.is_empty() {
+        registry_paths.push(PathBuf::from("test-registry"));
+    }
+
+    tracing::info!(count = registry_paths.len(), "Starting skillet server");
+
+    // Load and merge all registries
+    let mut merged_index = state::SkillIndex::default();
+    let mut config = state::RegistryConfig::default();
+
+    for (i, path) in registry_paths.iter().enumerate() {
+        if i == 0 {
+            // Use first registry's config for server name
+            config = index::load_config(path)?;
         }
-        (Some(_), Some(_)) => unreachable!("clap group prevents this"),
-    };
+        let idx = index::load_index(path)?;
+        merged_index.merge(idx);
+    }
 
-    let registry_path = match args.subdir {
-        Some(sub) => registry_path.join(sub),
-        None => registry_path,
-    };
+    let skill_search = search::SkillSearch::build(&merged_index);
+    let state = AppState::new(registry_paths, merged_index, skill_search, config);
 
-    tracing::info!(registry = %registry_path.display(), "Starting skillet server");
-
-    // Load registry config and skill index
-    let config = index::load_config(&registry_path)?;
-    let skill_index = index::load_index(&registry_path)?;
-    let skill_search = search::SkillSearch::build(&skill_index);
-    let state = AppState::new(registry_path, skill_index, skill_search, config);
-
-    // Spawn background refresh task if using a remote
-    if let Some(url) = args.remote {
-        let interval = parse_duration(&args.refresh_interval)?;
-        if interval > Duration::ZERO {
+    // Spawn background refresh tasks for each remote
+    let interval = parse_duration(&args.refresh_interval)?;
+    if interval > Duration::ZERO {
+        for url in args.remote {
             spawn_refresh_task(Arc::clone(&state), url, interval);
         }
     }
@@ -476,13 +493,28 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     Ok(())
 }
 
-/// Reload the skill index and search from disk.
+/// Reload all skill indexes and rebuild search.
 ///
 /// Shared by both the remote refresh task and the filesystem watch task.
 async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
-    let registry_path = state.registry_path.clone();
-    let new_index =
-        tokio::task::spawn_blocking(move || index::load_index(&registry_path)).await??;
+    let paths = state.registry_paths.clone();
+    let new_index = tokio::task::spawn_blocking(move || {
+        let mut merged = state::SkillIndex::default();
+        for path in &paths {
+            match index::load_index(path) {
+                Ok(idx) => merged.merge(idx),
+                Err(e) => {
+                    tracing::warn!(
+                        registry = %path.display(),
+                        error = %e,
+                        "Failed to reload registry, skipping"
+                    );
+                }
+            }
+        }
+        merged
+    })
+    .await?;
     let new_search = search::SkillSearch::build(&new_index);
     let mut idx = state.index.write().await;
     let mut srch = state.search.write().await;
@@ -491,11 +523,18 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Spawn a background task that periodically pulls from the remote and
-/// reloads the index if the HEAD commit changes.
+/// Spawn a background task that periodically pulls from a remote and
+/// reloads all indexes if the HEAD commit changes.
 fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
+    // Find the local cache path for this remote URL
+    let cache_path = {
+        let base = default_cache_dir();
+        cache_dir_for_url(&base, &url)
+    };
+
     tracing::info!(
         interval_secs = interval.as_secs(),
+        remote = %url,
         "Starting background refresh task"
     );
 
@@ -503,12 +542,12 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
         loop {
             tokio::time::sleep(interval).await;
 
-            let registry_path = state.registry_path.clone();
+            let pull_path = cache_path.clone();
 
             let pull_result = tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
-                let before = git::head(&registry_path)?;
-                git::pull(&registry_path)?;
-                let after = git::head(&registry_path)?;
+                let before = git::head(&pull_path)?;
+                git::pull(&pull_path)?;
+                let after = git::head(&pull_path)?;
 
                 if before == after {
                     return Ok(false);
@@ -558,17 +597,19 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
     });
 }
 
-/// Spawn a background task that watches the local registry directory for
+/// Spawn a background task that watches all local registry directories for
 /// changes and reloads the index when relevant files are modified.
 fn spawn_watch_task(state: Arc<AppState>) {
     use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 
-    tracing::info!(
-        registry = %state.registry_path.display(),
-        "Watching local registry for changes"
-    );
+    for path in &state.registry_paths {
+        tracing::info!(
+            registry = %path.display(),
+            "Watching local registry for changes"
+        );
+    }
 
-    let watch_path = state.registry_path.clone();
+    let watch_paths: Vec<PathBuf> = state.registry_paths.clone();
 
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -586,10 +627,12 @@ fn spawn_watch_task(state: Arc<AppState>) {
                 })
                 .expect("failed to create filesystem watcher");
 
-            debouncer
-                .watcher()
-                .watch(&watch_path, RecursiveMode::Recursive)
-                .expect("failed to watch registry directory");
+            for path in &watch_paths {
+                debouncer
+                    .watcher()
+                    .watch(path, RecursiveMode::Recursive)
+                    .expect("failed to watch registry directory");
+            }
 
             debouncer
         };
@@ -690,7 +733,7 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(registry_path, skill_index, skill_search, config);
+        let state = AppState::new(vec![registry_path], skill_index, skill_search, config);
         build_router(state)
     }
 
