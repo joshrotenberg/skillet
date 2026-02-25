@@ -44,7 +44,6 @@ jobs:
           git config --global user.email "ci@test.example"
           git config --global user.name "CI Test"
       - run: cargo test --all-features
-      - run: cargo test --test '*' --all-features
 
   msrv:
     name: MSRV (1.90)
