@@ -832,6 +832,7 @@ fn build_router(state: Arc<AppState>) -> McpRouter {
     let search_skills = tools::search_skills::build(state.clone());
     let list_categories = tools::list_categories::build(state.clone());
     let list_skills_by_owner = tools::list_skills_by_owner::build(state.clone());
+    let install_skill = tools::install_skill::build(state.clone());
 
     let skill_content = resources::skill_content::build(state.clone());
     let skill_content_versioned = resources::skill_content::build_versioned(state.clone());
@@ -846,7 +847,8 @@ fn build_router(state: Arc<AppState>) -> McpRouter {
              Tools:\n\
              - search_skills: Search for skills by keyword, category, tag, or model\n\
              - list_categories: Browse all skill categories\n\
-             - list_skills_by_owner: List all skills by a publisher\n\n\
+             - list_skills_by_owner: List all skills by a publisher\n\
+             - install_skill: Install a skill to the local filesystem for persistent use\n\n\
              Resources:\n\
              - skillet://skills/{owner}/{name}: Get a skill's SKILL.md content\n\
              - skillet://skills/{owner}/{name}/{version}: Get a specific version\n\
@@ -860,16 +862,18 @@ fn build_router(state: Arc<AppState>) -> McpRouter {
              Using skills:\n\
              - **Inline (default)**: Read the resource and follow the skill's \
              instructions for the current session. No restart needed.\n\
-             - **Install**: Write the SKILL.md content to .claude/skills/<name>.md \
-             (project) or ~/.claude/skills/<name>.md (global) for persistent use \
-             across sessions. Requires a restart to take effect.\n\
-             - **Install and use**: Write the file for persistence AND follow \
+             - **Install**: Use the install_skill tool to write SKILL.md to the \
+             appropriate agent skills directory. Supports multiple targets \
+             (agents, claude, cursor, copilot, windsurf, gemini) and project \
+             or global scope. A restart may be required.\n\
+             - **Install and use**: Install for persistence AND follow \
              the instructions inline for immediate use.\n\n\
              Prefer inline use unless the user asks for installation.",
         )
         .tool(search_skills)
         .tool(list_categories)
         .tool(list_skills_by_owner)
+        .tool(install_skill)
         .resource_template(skill_content)
         .resource_template(skill_content_versioned)
         .resource_template(skill_metadata)
@@ -1218,6 +1222,7 @@ mod tests {
         assert!(names.contains(&"search_skills"));
         assert!(names.contains(&"list_categories"));
         assert!(names.contains(&"list_skills_by_owner"));
+        assert!(names.contains(&"install_skill"));
     }
 
     #[tokio::test]
