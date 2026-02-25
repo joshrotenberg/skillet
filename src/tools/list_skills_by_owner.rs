@@ -50,9 +50,14 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let mut output =
                     format!("## Skills by {} ({} total)\n\n", input.owner, results.len());
                 for s in &results {
+                    let version_info = if s.version_count > 1 {
+                        format!("v{}, {} versions", s.version, s.version_count)
+                    } else {
+                        format!("v{}", s.version)
+                    };
                     output.push_str(&format!(
-                        "- **{}** (v{}) -- {}\n",
-                        s.name, s.version, s.description,
+                        "- **{}** ({}) -- {}\n",
+                        s.name, version_info, s.description,
                     ));
                 }
 

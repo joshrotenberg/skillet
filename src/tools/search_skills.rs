@@ -116,9 +116,14 @@ pub fn build(state: Arc<AppState>) -> Tool {
 
                 let mut output = format!("Found {} skill(s):\n\n", results.len());
                 for s in &results {
+                    let version_info = if s.version_count > 1 {
+                        format!("v{}, {} versions", s.version, s.version_count)
+                    } else {
+                        format!("v{}", s.version)
+                    };
                     output.push_str(&format!(
-                        "## {}/{} (v{})\n{}\n",
-                        s.owner, s.name, s.version, s.description,
+                        "## {}/{} ({})\n{}\n",
+                        s.owner, s.name, version_info, s.description,
                     ));
                     if let Some(ref trigger) = s.trigger {
                         output.push_str(&format!("**When to use:** {trigger}\n"));

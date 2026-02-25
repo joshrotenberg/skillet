@@ -143,9 +143,10 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
 
     tracing::info!(registry = %registry_path.display(), "Starting skillet server");
 
-    // Load the skill index
+    // Load registry config and skill index
+    let config = index::load_config(&registry_path)?;
     let skill_index = index::load_index(&registry_path)?;
-    let state = AppState::new(registry_path, skill_index);
+    let state = AppState::new(registry_path, skill_index, config);
 
     // Spawn background refresh task if using a remote
     if let Some(url) = args.remote {
@@ -168,7 +169,7 @@ async fn main() -> Result<(), tower_mcp::BoxError> {
 
     // Assemble router
     let router = McpRouter::new()
-        .server_info("skillet", env!("CARGO_PKG_VERSION"))
+        .server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"))
         .instructions(
             "Skillet is a skill registry for AI agents. Use it to discover and \
              fetch skills relevant to your current task.\n\n\

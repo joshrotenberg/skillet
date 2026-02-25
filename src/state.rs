@@ -13,15 +13,75 @@ pub struct AppState {
     pub index: RwLock<SkillIndex>,
     /// Path to the registry root (git checkout)
     pub registry_path: PathBuf,
+    /// Registry configuration (from config.toml or defaults)
+    pub config: RegistryConfig,
 }
 
 impl AppState {
-    pub fn new(registry_path: PathBuf, index: SkillIndex) -> Arc<Self> {
+    pub fn new(registry_path: PathBuf, index: SkillIndex, config: RegistryConfig) -> Arc<Self> {
         Arc::new(Self {
             index: RwLock::new(index),
             registry_path,
+            config,
         })
     }
+}
+
+/// Top-level registry configuration, parsed from `config.toml`.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryConfig {
+    pub registry: RegistryInfo,
+}
+
+impl Default for RegistryConfig {
+    fn default() -> Self {
+        Self {
+            registry: RegistryInfo {
+                name: default_registry_name(),
+                version: default_registry_version(),
+                urls: None,
+                auth: None,
+            },
+        }
+    }
+}
+
+/// Core registry metadata.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct RegistryInfo {
+    #[serde(default = "default_registry_name")]
+    pub name: String,
+    #[serde(default = "default_registry_version")]
+    pub version: u32,
+    #[serde(default)]
+    pub urls: Option<RegistryUrls>,
+    #[serde(default)]
+    pub auth: Option<RegistryAuth>,
+}
+
+/// Optional URL endpoints for non-git-backed registries.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct RegistryUrls {
+    pub download: Option<String>,
+    pub api: Option<String>,
+}
+
+/// Optional auth configuration.
+#[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
+pub struct RegistryAuth {
+    #[serde(default)]
+    pub required: bool,
+}
+
+fn default_registry_name() -> String {
+    "skillet".to_string()
+}
+
+fn default_registry_version() -> u32 {
+    1
 }
 
 /// In-memory index of all skills in the registry
@@ -59,6 +119,26 @@ pub struct SkillVersion {
     /// Extra files in the skillpack (scripts/, references/, assets/)
     /// Keyed by relative path from skill root (e.g. "scripts/lint.sh")
     pub files: HashMap<String, SkillFile>,
+    /// ISO 8601 publish timestamp from versions.toml
+    pub published: Option<String>,
+    /// Whether this version's content is loaded from disk.
+    /// Historical versions listed in versions.toml have `has_content = false`.
+    pub has_content: bool,
+}
+
+/// Deserialized versions.toml manifest
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionsManifest {
+    pub versions: Vec<VersionRecord>,
+}
+
+/// A single version record from versions.toml
+#[derive(Debug, Clone, Deserialize)]
+pub struct VersionRecord {
+    pub version: String,
+    pub published: String,
+    #[serde(default)]
+    pub yanked: bool,
 }
 
 /// An extra file in a skillpack
@@ -139,6 +219,13 @@ pub struct SkillSummary {
     /// Extra files included in the skillpack
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub files: Vec<String>,
+    /// When the latest version was published (ISO 8601)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published: Option<String>,
+    /// Total number of versions (including yanked)
+    pub version_count: usize,
+    /// All available (non-yanked) version strings, oldest first
+    pub available_versions: Vec<String>,
 }
 
 impl SkillSummary {
@@ -149,6 +236,12 @@ impl SkillSummary {
         let compat = info.compatibility.as_ref();
         let mut files: Vec<String> = v.files.keys().cloned().collect();
         files.sort();
+        let available_versions: Vec<String> = entry
+            .versions
+            .iter()
+            .filter(|v| !v.yanked)
+            .map(|v| v.version.clone())
+            .collect();
         Some(Self {
             owner: entry.owner.clone(),
             name: entry.name.clone(),
@@ -161,6 +254,9 @@ impl SkillSummary {
             tags: classification.map(|c| c.tags.clone()).unwrap_or_default(),
             verified_with: compat.map(|c| c.verified_with.clone()).unwrap_or_default(),
             files,
+            published: v.published.clone(),
+            version_count: entry.versions.len(),
+            available_versions,
         })
     }
 }

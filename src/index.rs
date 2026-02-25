@@ -9,7 +9,30 @@ use std::path::Path;
 
 use anyhow::{Context, bail};
 
-use crate::state::{SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion};
+use crate::state::{
+    RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion,
+    VersionsManifest,
+};
+
+/// Load registry configuration from `config.toml` at the registry root.
+///
+/// If the file is absent, returns sensible defaults. If present but
+/// malformed, returns an error (fail loud rather than silently defaulting).
+pub fn load_config(registry_path: &Path) -> anyhow::Result<RegistryConfig> {
+    let config_path = registry_path.join("config.toml");
+    if !config_path.is_file() {
+        tracing::debug!("No config.toml found, using defaults");
+        return Ok(RegistryConfig::default());
+    }
+
+    let raw = std::fs::read_to_string(&config_path)
+        .with_context(|| format!("Failed to read {}", config_path.display()))?;
+    let config: RegistryConfig = toml::from_str(&raw)
+        .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+
+    tracing::info!(name = %config.registry.name, "Loaded registry config");
+    Ok(config)
+}
 
 /// Load a skill index from a registry directory.
 ///
@@ -111,7 +134,14 @@ pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
     Ok(index)
 }
 
-/// Load a single skill from its directory
+/// Load a single skill from its directory.
+///
+/// If `versions.toml` exists, builds a multi-version `SkillEntry` with one
+/// `SkillVersion` per record. Only the latest version (last entry) has full
+/// content loaded from disk; historical versions are placeholders with
+/// `has_content = false`.
+///
+/// Without `versions.toml`, behaves exactly as before (single version).
 fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry> {
     let toml_path = dir.join("skill.toml");
     let md_path = dir.join("SKILL.md");
@@ -144,20 +174,117 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
     // Collect extra files from scripts/, references/, assets/
     let files = load_extra_files(dir)?;
 
-    let version = SkillVersion {
-        version: metadata.skill.version.clone(),
-        metadata,
-        skill_md,
-        skill_toml_raw,
-        yanked: false,
-        files,
+    let versions_path = dir.join("versions.toml");
+    let versions = if versions_path.is_file() {
+        load_versions_manifest(&versions_path, &metadata)?
+    } else {
+        // Single-version backward compat
+        vec![SkillVersion {
+            version: metadata.skill.version.clone(),
+            metadata,
+            skill_md,
+            skill_toml_raw,
+            yanked: false,
+            files,
+            published: None,
+            has_content: true,
+        }]
     };
 
     Ok(SkillEntry {
         owner: owner.to_string(),
         name: name.to_string(),
-        versions: vec![version],
+        versions,
     })
+}
+
+/// Parse `versions.toml` and build the version list.
+///
+/// Returns a vec of `SkillVersion` ordered chronologically (oldest first).
+/// The last entry gets full content from the on-disk `skill.toml` + `SKILL.md`.
+/// Earlier entries are metadata-only placeholders.
+fn load_versions_manifest(
+    path: &Path,
+    current_metadata: &SkillMetadata,
+) -> anyhow::Result<Vec<SkillVersion>> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("Failed to read {}", path.display()))?;
+    let manifest: VersionsManifest =
+        toml::from_str(&raw).with_context(|| format!("Failed to parse {}", path.display()))?;
+
+    if manifest.versions.is_empty() {
+        bail!("versions.toml has no entries in {}", path.display());
+    }
+
+    // The last entry's version must match skill.toml's version
+    let last = manifest.versions.last().unwrap();
+    if last.version != current_metadata.skill.version {
+        bail!(
+            "Version mismatch: last entry in versions.toml is '{}' but skill.toml says '{}'",
+            last.version,
+            current_metadata.skill.version
+        );
+    }
+
+    // We need the on-disk content for the last entry. Re-read from the parent
+    // directory (path is `dir/versions.toml`, so parent is the skill dir).
+    let skill_dir = path.parent().unwrap();
+    let toml_path = skill_dir.join("skill.toml");
+    let md_path = skill_dir.join("SKILL.md");
+
+    let skill_toml_raw = std::fs::read_to_string(&toml_path)
+        .with_context(|| format!("Failed to read {}", toml_path.display()))?;
+    let skill_md = std::fs::read_to_string(&md_path)
+        .with_context(|| format!("Failed to read {}", md_path.display()))?;
+    let files = load_extra_files(skill_dir)?;
+
+    let total = manifest.versions.len();
+    let mut versions = Vec::with_capacity(total);
+
+    for (i, record) in manifest.versions.into_iter().enumerate() {
+        let is_last = i == total - 1;
+
+        if is_last {
+            // Latest version: full content from disk
+            versions.push(SkillVersion {
+                version: record.version,
+                metadata: current_metadata.clone(),
+                skill_md: skill_md.clone(),
+                skill_toml_raw: skill_toml_raw.clone(),
+                yanked: record.yanked,
+                files: files.clone(),
+                published: Some(record.published),
+                has_content: true,
+            });
+        } else {
+            // Historical version: placeholder metadata, no content
+            let placeholder_metadata = SkillMetadata {
+                skill: crate::state::SkillInfo {
+                    name: current_metadata.skill.name.clone(),
+                    owner: current_metadata.skill.owner.clone(),
+                    version: record.version.clone(),
+                    description: current_metadata.skill.description.clone(),
+                    trigger: None,
+                    license: None,
+                    author: None,
+                    classification: None,
+                    compatibility: None,
+                },
+            };
+            versions.push(SkillVersion {
+                version: record.version,
+                metadata: placeholder_metadata,
+                skill_md: String::new(),
+                skill_toml_raw: String::new(),
+                yanked: record.yanked,
+                files: std::collections::HashMap::new(),
+                published: Some(record.published),
+                has_content: false,
+            });
+        }
+    }
+
+    Ok(versions)
 }
 
 /// Allowed subdirectories in a skillpack (per Agent Skills spec)
@@ -227,16 +354,262 @@ fn guess_mime_type(filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn test_registry() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+    }
+
     #[test]
     fn test_load_index_from_test_registry() {
-        let test_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry");
+        let test_dir = test_registry();
         if !test_dir.exists() {
-            return; // Skip if test registry not created yet
+            return;
         }
         let index = load_index(&test_dir).expect("Failed to load test index");
         assert!(
             !index.skills.is_empty(),
             "Index should have at least one skill"
         );
+    }
+
+    #[test]
+    fn test_multi_version_loading() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // rust-dev has versions.toml with 3 versions
+        let entry = index
+            .skills
+            .get(&("joshrotenberg".to_string(), "rust-dev".to_string()))
+            .expect("rust-dev should exist");
+
+        assert_eq!(entry.versions.len(), 3);
+
+        // Check ordering: oldest first
+        assert_eq!(entry.versions[0].version, "2026.01.01");
+        assert_eq!(entry.versions[1].version, "2026.02.01");
+        assert_eq!(entry.versions[2].version, "2026.02.24");
+
+        // Historical versions have no content
+        assert!(!entry.versions[0].has_content);
+        assert!(entry.versions[0].skill_md.is_empty());
+        assert!(!entry.versions[1].has_content);
+        assert!(entry.versions[1].skill_md.is_empty());
+
+        // Latest has full content
+        assert!(entry.versions[2].has_content);
+        assert!(!entry.versions[2].skill_md.is_empty());
+
+        // All have published timestamps
+        assert!(entry.versions[0].published.is_some());
+        assert!(entry.versions[2].published.is_some());
+
+        // latest() returns the last non-yanked version
+        let latest = entry.latest().expect("should have latest");
+        assert_eq!(latest.version, "2026.02.24");
+        assert!(latest.has_content);
+    }
+
+    #[test]
+    fn test_yanked_version_handling() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // python-dev has 2 versions, first is yanked
+        let entry = index
+            .skills
+            .get(&("acme".to_string(), "python-dev".to_string()))
+            .expect("python-dev should exist");
+
+        assert_eq!(entry.versions.len(), 2);
+        assert!(entry.versions[0].yanked);
+        assert!(!entry.versions[1].yanked);
+
+        // latest() skips yanked versions
+        let latest = entry.latest().expect("should have latest");
+        assert_eq!(latest.version, "2026.01.15");
+    }
+
+    #[test]
+    fn test_backward_compat_without_versions_toml() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // skillet/setup has no versions.toml -- should load as single version
+        let entry = index
+            .skills
+            .get(&("skillet".to_string(), "setup".to_string()))
+            .expect("skillet/setup should exist");
+
+        assert_eq!(entry.versions.len(), 1);
+        assert!(entry.versions[0].has_content);
+        assert!(!entry.versions[0].yanked);
+        assert!(entry.versions[0].published.is_none());
+        assert!(!entry.versions[0].skill_md.is_empty());
+    }
+
+    #[test]
+    fn test_version_mismatch_validation() {
+        // Create a temp dir with mismatched versions
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("testowner").join("testskill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        std::fs::write(
+            skill_dir.join("skill.toml"),
+            r#"
+[skill]
+name = "testskill"
+owner = "testowner"
+version = "2.0.0"
+description = "test"
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(skill_dir.join("SKILL.md"), "# Test").unwrap();
+
+        // versions.toml last entry says "1.0.0" but skill.toml says "2.0.0"
+        std::fs::write(
+            skill_dir.join("versions.toml"),
+            r#"
+[[versions]]
+version = "1.0.0"
+published = "2026-01-01T00:00:00Z"
+"#,
+        )
+        .unwrap();
+
+        let result = load_skill("testowner", "testskill", &skill_dir);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Version mismatch"),
+            "Expected version mismatch error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn test_load_config_from_test_registry() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let config = load_config(&test_dir).expect("Failed to load config");
+        assert_eq!(config.registry.name, "skillet");
+        assert_eq!(config.registry.version, 1);
+    }
+
+    #[test]
+    fn test_load_config_default_when_absent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = load_config(tmp.path()).expect("Failed to get default config");
+        assert_eq!(config.registry.name, "skillet");
+        assert_eq!(config.registry.version, 1);
+        assert!(config.registry.urls.is_none());
+        assert!(config.registry.auth.is_none());
+    }
+
+    #[test]
+    fn test_load_config_with_full_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            r#"
+[registry]
+name = "my-private-registry"
+version = 1
+
+[registry.urls]
+download = "https://skills.example.com/packages/{owner}/{name}/{version}.tar.gz"
+api = "https://skills.example.com/api/v1"
+
+[registry.auth]
+required = true
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(tmp.path()).expect("Failed to parse full config");
+        assert_eq!(config.registry.name, "my-private-registry");
+        assert_eq!(config.registry.version, 1);
+        let urls = config.registry.urls.unwrap();
+        assert!(urls.download.unwrap().contains("example.com"));
+        assert!(urls.api.unwrap().contains("api/v1"));
+        assert!(config.registry.auth.unwrap().required);
+    }
+
+    #[test]
+    fn test_load_config_malformed_fails() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("config.toml"), "this is not valid toml {{{").unwrap();
+
+        let result = load_config(tmp.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_latest_all_yanked_returns_none() {
+        let entry = SkillEntry {
+            owner: "test".to_string(),
+            name: "test".to_string(),
+            versions: vec![
+                SkillVersion {
+                    version: "1.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: crate::state::SkillInfo {
+                            name: "test".to_string(),
+                            owner: "test".to_string(),
+                            version: "1.0.0".to_string(),
+                            description: "test".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: String::new(),
+                    skill_toml_raw: String::new(),
+                    yanked: true,
+                    files: std::collections::HashMap::new(),
+                    published: Some("2026-01-01T00:00:00Z".to_string()),
+                    has_content: false,
+                },
+                SkillVersion {
+                    version: "2.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: crate::state::SkillInfo {
+                            name: "test".to_string(),
+                            owner: "test".to_string(),
+                            version: "2.0.0".to_string(),
+                            description: "test".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "content".to_string(),
+                    skill_toml_raw: String::new(),
+                    yanked: true,
+                    files: std::collections::HashMap::new(),
+                    published: Some("2026-02-01T00:00:00Z".to_string()),
+                    has_content: true,
+                },
+            ],
+        };
+
+        assert!(entry.latest().is_none());
     }
 }
