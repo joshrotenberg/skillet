@@ -41,12 +41,14 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let index = state.index.read().await;
 
                 let results: Vec<SkillSummary> = if input.query == "*" {
-                    // Wildcard: return all skills, apply structured filters only
-                    index
+                    // Wildcard: return all skills sorted by owner/name
+                    let mut all: Vec<_> = index
                         .skills
                         .values()
                         .filter_map(SkillSummary::from_entry)
-                        .collect()
+                        .collect();
+                    all.sort_by(|a, b| (&a.owner, &a.name).cmp(&(&b.owner, &b.name)));
+                    all
                 } else {
                     // BM25 search, then look up summaries
                     let search = state.search.read().await;
