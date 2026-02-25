@@ -6,6 +6,13 @@
       "env": {
         "RUST_LOG": "skillet=debug"
       }
+    },
+    "skillet-remote": {
+      "command": "cargo",
+      "args": ["run", "--", "--remote", "https://github.com/joshrotenberg/grimoire.git", "--subdir", "test-registry"],
+      "env": {
+        "RUST_LOG": "skillet=debug"
+      }
     }
   }
 }

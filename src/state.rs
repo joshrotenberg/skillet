@@ -12,7 +12,6 @@ pub struct AppState {
     /// In-memory skill index, refreshable
     pub index: RwLock<SkillIndex>,
     /// Path to the registry root (git checkout)
-    #[allow(dead_code)]
     pub registry_path: PathBuf,
 }
 
