@@ -80,10 +80,26 @@ pub fn build_versioned(state: Arc<AppState>) -> ResourceTemplate {
                     .iter()
                     .find(|v| v.version == version)
                     .ok_or_else(|| {
+                        let available: Vec<&str> =
+                            entry.versions.iter().map(|v| v.version.as_str()).collect();
                         tower_mcp::Error::tool(format!(
-                            "Version '{version}' not found for '{owner}/{name}'"
+                            "Version '{version}' not found for '{owner}/{name}'. \
+                             Available versions: {}",
+                            available.join(", ")
                         ))
                     })?;
+
+                if !skill_version.has_content {
+                    let latest_ver = entry
+                        .latest()
+                        .map(|v| v.version.as_str())
+                        .unwrap_or("unknown");
+                    return Err(tower_mcp::Error::tool(format!(
+                        "Content for '{owner}/{name}' v{version} is not available. \
+                         Historical version content is stored in git history. \
+                         Use the latest version (v{latest_ver}) for full content.",
+                    )));
+                }
 
                 Ok(ReadResourceResult {
                     contents: vec![ResourceContent {

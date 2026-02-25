@@ -1,0 +1,14 @@
+[[versions]]
+version = "2026.01.01"
+published = "2026-01-01T12:00:00Z"
+yanked = false
+
+[[versions]]
+version = "2026.02.01"
+published = "2026-02-01T12:00:00Z"
+yanked = false
+
+[[versions]]
+version = "2026.02.24"
+published = "2026-02-24T12:00:00Z"
+yanked = false
