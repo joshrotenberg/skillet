@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::cache::{self, RegistrySource};
 use crate::config::SkilletConfig;
 use crate::state::SkillIndex;
 use crate::{git, index};
@@ -217,9 +218,30 @@ pub fn load_registries(
     let cache_base = default_cache_dir();
     let mut registry_paths = Vec::new();
 
-    // Add local registries
+    let cache_enabled = config.cache.enabled;
+    let cache_ttl = if cache_enabled {
+        parse_duration(&config.cache.ttl).unwrap_or(Duration::from_secs(300))
+    } else {
+        Duration::ZERO
+    };
+
+    let mut merged = SkillIndex::default();
+
+    // Load local registries
     for path in &local_paths {
         registry_paths.push(path.clone());
+        let source = RegistrySource::Local(path.clone());
+
+        if cache_enabled && let Some(idx) = cache::load(&source, cache_ttl) {
+            merged.merge(idx);
+            continue;
+        }
+
+        let idx = index::load_index(path)?;
+        if cache_enabled {
+            cache::write(&source, &idx);
+        }
+        merged.merge(idx);
     }
 
     // Clone/pull remote registries
@@ -231,15 +253,24 @@ pub fn load_registries(
         git::clone_or_pull(url, &target)?;
         let path = match subdir {
             Some(sub) => target.join(sub),
-            None => target,
+            None => target.clone(),
         };
-        registry_paths.push(path);
-    }
+        registry_paths.push(path.clone());
 
-    // Load and merge all indexes
-    let mut merged = SkillIndex::default();
-    for path in &registry_paths {
-        let idx = index::load_index(path)?;
+        let source = RegistrySource::Remote {
+            url: url.to_string(),
+            checkout: target,
+        };
+
+        if cache_enabled && let Some(idx) = cache::load(&source, cache_ttl) {
+            merged.merge(idx);
+            continue;
+        }
+
+        let idx = index::load_index(&path)?;
+        if cache_enabled {
+            cache::write(&source, &idx);
+        }
         merged.merge(idx);
     }
 

@@ -15,6 +15,7 @@ use clap::{Parser, Subcommand};
 use tower_mcp::transport::http::HttpTransport;
 use tower_mcp::{McpRouter, StdioTransport};
 
+use skillet_mcp::cache::{self, RegistrySource};
 use skillet_mcp::config;
 use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::manifest;
@@ -163,6 +164,10 @@ struct RegistryArgs {
     /// Subdirectory within registries that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
+
+    /// Bypass the disk cache and rebuild the index from scratch
+    #[arg(long)]
+    no_cache: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -500,13 +505,17 @@ fn run_install(args: InstallArgs) -> ExitCode {
         }
     };
 
-    let cli_config = match config::load_config() {
+    let mut cli_config = match config::load_config() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error loading config: {e}");
             return ExitCode::from(1);
         }
     };
+
+    if args.registries.no_cache {
+        cli_config.cache.enabled = false;
+    }
 
     let targets = match config::resolve_targets(&args.target, &cli_config) {
         Ok(t) => t,
@@ -634,13 +643,17 @@ fn run_install(args: InstallArgs) -> ExitCode {
 
 /// Run the `search` subcommand.
 fn run_search(args: SearchArgs) -> ExitCode {
-    let cli_config = match config::load_config() {
+    let mut cli_config = match config::load_config() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error loading config: {e}");
             return ExitCode::from(1);
         }
     };
+
+    if args.registries.no_cache {
+        cli_config.cache.enabled = false;
+    }
 
     let (skill_index, _registry_paths) = match registry::load_registries(
         &args.registries.registry,
@@ -730,13 +743,17 @@ fn run_info(args: InfoArgs) -> ExitCode {
         }
     };
 
-    let cli_config = match config::load_config() {
+    let mut cli_config = match config::load_config() {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error loading config: {e}");
             return ExitCode::from(1);
         }
     };
+
+    if args.registries.no_cache {
+        cli_config.cache.enabled = false;
+    }
 
     let (skill_index, _registry_paths) = match registry::load_registries(
         &args.registries.registry,
@@ -1042,7 +1059,14 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     }
 
     let skill_search = search::SkillSearch::build(&merged_index);
-    let state = AppState::new(registry_paths, merged_index, skill_search, config);
+    let remote_urls = args.remote.clone();
+    let state = AppState::new(
+        registry_paths,
+        remote_urls,
+        merged_index,
+        skill_search,
+        config,
+    );
 
     // Spawn background refresh tasks for each remote
     let interval = parse_duration(&args.refresh_interval)?;
@@ -1073,14 +1097,22 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     Ok(())
 }
 
-/// Reload all skill indexes and rebuild search.
+/// Reload all skill indexes and rebuild search, writing cache for each registry.
 async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
     let paths = state.registry_paths.clone();
+    let remote_urls = state.remote_urls.clone();
+    let cache_base = default_cache_dir();
+
     let new_index = tokio::task::spawn_blocking(move || {
         let mut merged = state::SkillIndex::default();
         for path in &paths {
             match index::load_index(path) {
-                Ok(idx) => merged.merge(idx),
+                Ok(idx) => {
+                    // Write cache for this individual registry
+                    let source = registry_source_for_path(path, &remote_urls, &cache_base);
+                    cache::write(&source, &idx);
+                    merged.merge(idx);
+                }
                 Err(e) => {
                     tracing::warn!(
                         registry = %path.display(),
@@ -1099,6 +1131,27 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
     *idx = new_index;
     *srch = new_search;
     Ok(())
+}
+
+/// Determine the cache `RegistrySource` for a given registry path.
+///
+/// Checks if the path is a cached clone of a known remote URL; if so,
+/// returns `RegistrySource::Remote`, otherwise `RegistrySource::Local`.
+fn registry_source_for_path(
+    path: &std::path::Path,
+    remote_urls: &[String],
+    cache_base: &std::path::Path,
+) -> RegistrySource {
+    for url in remote_urls {
+        let checkout = cache_dir_for_url(cache_base, url);
+        if path.starts_with(&checkout) {
+            return RegistrySource::Remote {
+                url: url.clone(),
+                checkout,
+            };
+        }
+    }
+    RegistrySource::Local(path.to_path_buf())
 }
 
 /// Spawn a background task that periodically pulls from a remote and
@@ -1271,7 +1324,13 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         build_router(state)
     }
 

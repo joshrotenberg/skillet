@@ -5,6 +5,7 @@
 //! adds the CLI (clap) and MCP server (tower-mcp) on top.
 
 pub mod bm25;
+pub mod cache;
 pub mod config;
 pub mod error;
 pub mod git;

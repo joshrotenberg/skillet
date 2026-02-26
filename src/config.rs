@@ -15,6 +15,26 @@ use crate::error::Error;
 pub struct SkilletConfig {
     pub install: InstallConfig,
     pub registries: RegistriesConfig,
+    pub cache: CacheConfig,
+}
+
+/// `[cache]` section: disk cache for the skill index.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CacheConfig {
+    /// Whether disk caching is enabled.
+    pub enabled: bool,
+    /// Time-to-live for cached index files (e.g. "5m", "1h", "0").
+    pub ttl: String,
+}
+
+impl Default for CacheConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            ttl: "5m".to_string(),
+        }
+    }
 }
 
 /// `[install]` section: default targets and global flag.
@@ -311,6 +331,7 @@ targets = ["gemini"]
                 global: false,
             },
             registries: RegistriesConfig::default(),
+            ..Default::default()
         };
         let flags = vec!["cursor".to_string()];
         let targets = resolve_targets(&flags, &config).unwrap();
@@ -325,6 +346,7 @@ targets = ["gemini"]
                 global: false,
             },
             registries: RegistriesConfig::default(),
+            ..Default::default()
         };
         let targets = resolve_targets(&[], &config).unwrap();
         assert_eq!(targets, vec![InstallTarget::Claude, InstallTarget::Cursor]);
@@ -338,6 +360,7 @@ targets = ["gemini"]
                 global: false,
             },
             registries: RegistriesConfig::default(),
+            ..Default::default()
         };
         let targets = resolve_targets(&[], &config).unwrap();
         assert_eq!(targets, vec![InstallTarget::Agents]);

@@ -17,6 +17,8 @@ pub struct AppState {
     pub search: RwLock<SkillSearch>,
     /// Paths to all registry roots (git checkouts)
     pub registry_paths: Vec<PathBuf>,
+    /// Remote URLs (for cache key generation)
+    pub remote_urls: Vec<String>,
     /// Registry configuration (from config.toml or defaults)
     pub config: RegistryConfig,
 }
@@ -24,6 +26,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         registry_paths: Vec<PathBuf>,
+        remote_urls: Vec<String>,
         index: SkillIndex,
         search: SkillSearch,
         config: RegistryConfig,
@@ -32,6 +35,7 @@ impl AppState {
             index: RwLock::new(index),
             search: RwLock::new(search),
             registry_paths,
+            remote_urls,
             config,
         })
     }
@@ -130,7 +134,7 @@ impl SkillIndex {
 }
 
 /// A skill with all its versions
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
     pub owner: String,
     pub name: String,
@@ -145,7 +149,7 @@ impl SkillEntry {
 }
 
 /// A single published version of a skill
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillVersion {
     pub version: String,
     pub metadata: SkillMetadata,
@@ -183,7 +187,7 @@ pub struct VersionRecord {
 }
 
 /// An extra file in a skillpack
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillFile {
     pub content: String,
     pub mime_type: String,
