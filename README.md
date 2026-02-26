@@ -32,43 +32,88 @@ commands and the MCP server share the same index and search engine.
 
 ## Install
 
+### Homebrew (macOS / Linux)
+
+```bash
+brew install joshrotenberg/brew/skillet-mcp
+```
+
+### Shell script
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/joshrotenberg/skillet/releases/latest/download/skillet-mcp-installer.sh | sh
+```
+
+### Cargo
+
 ```bash
 cargo install skillet-mcp
 ```
 
-Or build from source:
+### Docker
 
 ```bash
-cargo install --git https://github.com/joshrotenberg/skillet.git
+docker pull ghcr.io/joshrotenberg/skillet:latest
+docker run --rm -i ghcr.io/joshrotenberg/skillet:latest
 ```
 
-Requires Rust 1.90 or later.
+Pre-built binaries for macOS, Linux, and Windows are also available on
+the [releases page](https://github.com/joshrotenberg/skillet/releases).
 
 ## Quick start
 
-### Set up
+### Give your agent access to skills (fastest)
 
-```bash
-skillet setup
+Add skillet to your agent's MCP config and you're done -- your agent
+can search, read, and install skills at runtime:
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet"
+    }
+  }
+}
 ```
 
-This writes a default config at `~/.config/skillet/config.toml` with the
+That's it. Skillet auto-discovers the
 [official registry](https://github.com/joshrotenberg/skillet-registry)
-and prints an MCP config snippet you can paste into your agent. After
-that, CLI commands work without `--remote` flags.
+and any skills already installed on your machine. Your agent now has
+access to `search_skills`, `install_skill`, and the full
+[MCP interface](#mcp-interface).
 
-### Search and install skills
+For custom or team registries, add `--remote` or `--registry` args:
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet",
+      "args": [
+        "--registry", "/path/to/local-skills",
+        "--remote", "https://github.com/acme/team-skills.git"
+      ]
+    }
+  }
+}
+```
+
+### Use the CLI
+
+For hands-on skill management, run `skillet setup` to write a default
+config, then use CLI commands directly:
 
 ```bash
+# One-time setup (writes ~/.config/skillet/config.toml)
+skillet setup
+
 # Browse everything
 skillet search *
 
-# Search by keyword
+# Search by keyword, category, tag, or owner
 skillet search rust
-
-# Filter by category, tag, or owner
 skillet search * --category development
-skillet search * --tag pytest
 skillet search * --owner joshrotenberg
 
 # See what categories exist
@@ -83,7 +128,7 @@ skillet install joshrotenberg/rust-dev
 # Install for a specific agent
 skillet install joshrotenberg/rust-dev --target claude
 
-# Install for all supported agents
+# Install for all supported agents at once
 skillet install joshrotenberg/rust-dev --target all
 
 # See what's installed
@@ -116,55 +161,9 @@ skillet pack myname/my-skill
 skillet publish myname/my-skill --repo owner/registry
 ```
 
-### Serve over MCP
-
-Add skillet to your agent's MCP config to give it runtime access to
-skills:
-
-```json
-{
-  "mcpServers": {
-    "skillet": {
-      "command": "skillet"
-    }
-  }
-}
-```
-
-That's it. Skillet auto-discovers the official registry and any skills
-already installed on your machine. For custom registries:
-
-```json
-{
-  "mcpServers": {
-    "skillet": {
-      "command": "skillet",
-      "args": [
-        "--registry", "/path/to/local-skills",
-        "--remote", "https://github.com/acme/team-skills.git"
-      ]
-    }
-  }
-}
-```
-
-Multiple `--registry` and `--remote` flags can be combined. First match
-wins on name collisions.
-
 ### What it looks like
 
-**CLI:**
-
-```
-$ skillet search rust
-
-  joshrotenberg/rust-dev    Rust development standards and conventions
-  joshrotenberg/rust-ci     Rust CI/CD pipeline setup
-
-Found 2 skills matching "rust"
-```
-
-**MCP (agent integration):**
+**Your agent, with skillet as an MCP server:**
 
 ```
 User: Set up a new Rust project with CI
@@ -176,6 +175,17 @@ Agent: Let me search for relevant skills.
        [reads skillet://skills/joshrotenberg/rust-dev]
 
        I'll follow the rust-dev skill conventions for project setup...
+```
+
+**CLI:**
+
+```
+$ skillet search rust
+
+  joshrotenberg/rust-dev    Rust development standards and conventions
+  joshrotenberg/rust-ci     Rust CI/CD pipeline setup
+
+Found 2 skills matching "rust"
 ```
 
 ## Features
