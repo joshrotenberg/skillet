@@ -1460,4 +1460,158 @@ mod tests {
         let text = result.first_text().expect("should have text content");
         assert!(text.contains("[skill]"), "should return skill.toml content");
     }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills_with_category_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "*", "category": "security"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("security-audit"),
+            "should find security-audit: {text}"
+        );
+        // Should not include skills from other categories
+        assert!(
+            !text.contains("python-dev"),
+            "should not include python-dev: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills_with_tag_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "*", "tag": "pytest"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("python-dev"),
+            "should find python-dev (has pytest tag): {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills_with_verified_with_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "*", "verified_with": "claude-sonnet-4-6"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("python-dev"),
+            "python-dev is verified with claude-sonnet-4-6: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_search_skills_no_results() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "nonexistent_xyzzy_skill"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("No skills found"),
+            "should report no results: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_read_files_resource() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .read_resource("skillet://files/acme/python-dev/scripts/lint.sh")
+            .await;
+
+        let text = result.first_text().expect("should have text content");
+        assert!(text.contains("ruff"), "lint.sh should mention ruff: {text}");
+    }
+
+    #[tokio::test]
+    async fn test_mcp_read_files_resource_reference() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .read_resource("skillet://files/acme/python-dev/references/RUFF_CONFIG.md")
+            .await;
+
+        let text = result.first_text().expect("should have text content");
+        assert!(
+            text.contains("pyproject.toml"),
+            "RUFF_CONFIG.md should mention pyproject.toml: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list_skills_by_owner_no_results() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "list_skills_by_owner",
+                serde_json::json!({"owner": "nonexistent_owner"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("No skills found") || text.contains("0"),
+            "should handle nonexistent owner: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_call_nonexistent_tool() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let error = client
+            .call_tool_expect_error("nonexistent_tool", serde_json::json!({}))
+            .await;
+
+        assert!(error.get("code").is_some());
+    }
 }
