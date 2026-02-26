@@ -14,7 +14,7 @@ use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::integrity;
 use skillet_mcp::manifest;
 use skillet_mcp::safety;
-use skillet_mcp::state::AppState;
+use skillet_mcp::state::{AppState, SkillSource};
 use skillet_mcp::trust;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -55,6 +55,19 @@ pub fn build(state: Arc<AppState>) -> Tool {
                         )));
                     }
                 };
+
+                // Local skills are already installed -- no action needed
+                if let SkillSource::Local { platform, path } = &entry.source {
+                    return Ok(CallToolResult::text(format!(
+                        "Skill '{}/{}' is already installed locally at `{}`.\n\n\
+                         This skill was discovered from the {} agent directory \
+                         and is not a registry skill. No installation needed.",
+                        input.owner,
+                        input.name,
+                        path.display(),
+                        platform,
+                    )));
+                }
 
                 // Get latest version
                 let version = match entry.latest() {

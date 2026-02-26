@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 
 use crate::integrity;
 use crate::state::{
-    RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillVersion,
+    RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
     VersionsManifest,
 };
 use crate::validate;
@@ -190,6 +190,7 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
         owner: owner.to_string(),
         name: name.to_string(),
         versions,
+        source: SkillSource::default(),
     })
 }
 
@@ -771,6 +772,7 @@ description = "Just a description, nothing else new"
         let entry = SkillEntry {
             owner: "test".to_string(),
             name: "test".to_string(),
+            source: SkillSource::default(),
             versions: vec![
                 SkillVersion {
                     version: "1.0.0".to_string(),
