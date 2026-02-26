@@ -15,6 +15,7 @@ pub mod manifest;
 pub mod pack;
 pub mod publish;
 pub mod registry;
+pub mod scaffold;
 pub mod search;
 pub mod state;
 pub mod validate;
