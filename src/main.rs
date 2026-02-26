@@ -58,6 +58,8 @@ enum Command {
     Install(InstallArgs),
     /// Search for skills in registries
     Search(SearchArgs),
+    /// List all skill categories with counts
+    Categories(CategoriesArgs),
     /// Show detailed information about a skill
     Info(InfoArgs),
     /// List installed skills
@@ -244,6 +246,16 @@ struct SearchArgs {
     #[arg(long)]
     tag: Option<String>,
 
+    /// Filter by owner
+    #[arg(long)]
+    owner: Option<String>,
+
+    #[command(flatten)]
+    registries: RegistryArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct CategoriesArgs {
     #[command(flatten)]
     registries: RegistryArgs,
 }
@@ -342,6 +354,7 @@ async fn main() -> ExitCode {
         Some(Command::InitSkill(args)) => run_init_skill(args),
         Some(Command::Install(args)) => run_install(args),
         Some(Command::Search(args)) => run_search(args),
+        Some(Command::Categories(args)) => run_categories(args),
         Some(Command::Info(args)) => run_info(args),
         Some(Command::List(args)) => run_list(args),
         Some(Command::Trust(args)) => run_trust(args),
@@ -899,6 +912,56 @@ fn run_install(args: InstallArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// Run the `categories` subcommand.
+fn run_categories(args: CategoriesArgs) -> ExitCode {
+    let mut cli_config = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if args.registries.no_cache {
+        cli_config.cache.enabled = false;
+    }
+
+    let (skill_index, _registry_paths) = match registry::load_registries(
+        &args.registries.registry,
+        &args.registries.remote,
+        &cli_config,
+        args.registries.subdir.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading registries: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if skill_index.categories.is_empty() {
+        println!("No categories found.");
+        return ExitCode::SUCCESS;
+    }
+
+    let total: usize = skill_index.categories.values().sum();
+    println!(
+        "{} categor{} ({total} skill{}):\n",
+        skill_index.categories.len(),
+        if skill_index.categories.len() == 1 {
+            "y"
+        } else {
+            "ies"
+        },
+        if total == 1 { "" } else { "s" },
+    );
+    for (name, count) in &skill_index.categories {
+        println!("  {name} ({count})");
+    }
+
+    ExitCode::SUCCESS
+}
+
 /// Run the `search` subcommand.
 fn run_search(args: SearchArgs) -> ExitCode {
     let mut cli_config = match config::load_config() {
@@ -959,6 +1022,11 @@ fn run_search(args: SearchArgs) -> ExitCode {
             }
             if let Some(ref tag) = args.tag
                 && !s.tags.iter().any(|t| t.eq_ignore_ascii_case(tag))
+            {
+                return false;
+            }
+            if let Some(ref owner) = args.owner
+                && !s.owner.eq_ignore_ascii_case(owner)
             {
                 return false;
             }
