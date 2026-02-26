@@ -21,7 +21,10 @@ use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::manifest;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
-use skillet_mcp::{git, index, pack, publish, registry, safety, scaffold, search, state, validate};
+use skillet_mcp::{
+    git, index, integrity, pack, publish, registry, safety, scaffold, search, state, trust,
+    validate,
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
@@ -58,6 +61,10 @@ enum Command {
     Info(InfoArgs),
     /// List installed skills
     List(ListArgs),
+    /// Manage trusted registries and pinned skills
+    Trust(TrustArgs),
+    /// Audit installed skills against pinned content hashes
+    Audit(AuditArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -240,6 +247,70 @@ struct ListArgs {
     installed: bool,
 }
 
+#[derive(clap::Args, Debug)]
+struct TrustArgs {
+    #[command(subcommand)]
+    action: TrustAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum TrustAction {
+    /// Add a registry to the trusted list
+    AddRegistry(TrustAddRegistryArgs),
+    /// Remove a registry from the trusted list
+    RemoveRegistry(TrustRemoveRegistryArgs),
+    /// List trusted registries and pinned skills
+    List(TrustListArgs),
+    /// Pin a skill's content hash
+    Pin(TrustPinArgs),
+    /// Remove a skill's content hash pin
+    Unpin(TrustUnpinArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct TrustAddRegistryArgs {
+    /// Registry URL to trust
+    url: String,
+    /// Optional note describing why this registry is trusted
+    #[arg(long)]
+    note: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct TrustRemoveRegistryArgs {
+    /// Registry URL to remove
+    url: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct TrustListArgs {
+    /// Only show trusted registries (omit pinned skills)
+    #[arg(long)]
+    registries_only: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct TrustPinArgs {
+    /// Skill to pin in owner/name format
+    skill: String,
+
+    #[command(flatten)]
+    registries: RegistryArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct TrustUnpinArgs {
+    /// Skill to unpin in owner/name format
+    skill: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct AuditArgs {
+    /// Audit only a specific skill (owner/name format)
+    #[arg(long)]
+    skill: Option<String>,
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -256,6 +327,8 @@ async fn main() -> ExitCode {
         Some(Command::Search(args)) => run_search(args),
         Some(Command::Info(args)) => run_info(args),
         Some(Command::List(args)) => run_list(args),
+        Some(Command::Trust(args)) => run_trust(args),
+        Some(Command::Audit(args)) => run_audit(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     };
@@ -691,10 +764,64 @@ fn run_install(args: InstallArgs) -> ExitCode {
         "unknown".to_string()
     };
 
+    // Trust checking
+    let content_hash = integrity::sha256_hex(&version.skill_md);
+    let trust_state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let trust_check = trust::check_trust(&trust_state, &registry_id, owner, name, &content_hash);
+
+    match trust_check.tier {
+        trust::TrustTier::Trusted => {}
+        trust::TrustTier::Reviewed => {
+            if trust_check.pinned_hash.as_deref() != Some(&content_hash) {
+                eprintln!(
+                    "Warning: {} (tier: reviewed, content changed since pinned)",
+                    trust_check.reason
+                );
+            }
+        }
+        trust::TrustTier::Unknown => {
+            let policy = &cli_config.trust.unknown_policy;
+            match policy.as_str() {
+                "block" => {
+                    eprintln!(
+                        "Error: {}\nInstall blocked by trust policy (unknown_policy = \"block\").\n\
+                         Trust this registry with: skillet trust add-registry {registry_id}",
+                        trust_check.reason
+                    );
+                    return ExitCode::from(1);
+                }
+                "prompt" => {
+                    eprintln!(
+                        "Warning: {}\nProceed with install? [y/N] ",
+                        trust_check.reason
+                    );
+                    let mut input = String::new();
+                    if std::io::stdin().read_line(&mut input).is_err()
+                        || !input.trim().eq_ignore_ascii_case("y")
+                    {
+                        eprintln!("Install cancelled.");
+                        return ExitCode::from(1);
+                    }
+                }
+                _ => {
+                    // "warn" (default)
+                    eprintln!("Warning: {}", trust_check.reason);
+                }
+            }
+        }
+    }
+
     let options = InstallOptions {
         targets,
         global,
-        registry: registry_id,
+        registry: registry_id.clone(),
     };
 
     let results =
@@ -710,6 +837,15 @@ fn run_install(args: InstallArgs) -> ExitCode {
     if let Err(e) = manifest::save(&installed_manifest) {
         eprintln!("Error saving installation manifest: {e}");
         return ExitCode::from(1);
+    }
+
+    // Auto-pin content hash after successful install
+    if cli_config.trust.auto_pin {
+        let mut trust_state = trust_state;
+        trust_state.pin_skill(owner, name, &version.version, &registry_id, &content_hash);
+        if let Err(e) = trust::save(&trust_state) {
+            eprintln!("Warning: failed to save trust state: {e}");
+        }
     }
 
     // Print results
@@ -730,7 +866,6 @@ fn run_install(args: InstallArgs) -> ExitCode {
     }
 
     // Safety scanning (informational only -- never blocks install)
-    let cli_config = config::load_config().unwrap_or_default();
     let report = safety::scan(
         &version.skill_md,
         &version.skill_toml_raw,
@@ -1031,6 +1166,285 @@ fn run_list(_args: ListArgs) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Run the `trust` subcommand.
+fn run_trust(args: TrustArgs) -> ExitCode {
+    match args.action {
+        TrustAction::AddRegistry(a) => run_trust_add_registry(a),
+        TrustAction::RemoveRegistry(a) => run_trust_remove_registry(a),
+        TrustAction::List(a) => run_trust_list(a),
+        TrustAction::Pin(a) => run_trust_pin(a),
+        TrustAction::Unpin(a) => run_trust_unpin(a),
+    }
+}
+
+fn run_trust_add_registry(args: TrustAddRegistryArgs) -> ExitCode {
+    let mut state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if state.is_trusted(&args.url) {
+        println!("Registry already trusted: {}", args.url);
+        return ExitCode::SUCCESS;
+    }
+
+    state.add_registry(&args.url, args.note.as_deref());
+
+    if let Err(e) = trust::save(&state) {
+        eprintln!("Error saving trust state: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Trusted: {}", args.url);
+    ExitCode::SUCCESS
+}
+
+fn run_trust_remove_registry(args: TrustRemoveRegistryArgs) -> ExitCode {
+    let mut state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if !state.remove_registry(&args.url) {
+        eprintln!("Registry not found in trusted list: {}", args.url);
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = trust::save(&state) {
+        eprintln!("Error saving trust state: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Removed: {}", args.url);
+    ExitCode::SUCCESS
+}
+
+fn run_trust_list(args: TrustListArgs) -> ExitCode {
+    let state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if state.trusted_registries.is_empty() && state.pinned_skills.is_empty() {
+        println!("No trusted registries or pinned skills.");
+        return ExitCode::SUCCESS;
+    }
+
+    if !state.trusted_registries.is_empty() {
+        println!("Trusted registries ({}):\n", state.trusted_registries.len());
+        for r in &state.trusted_registries {
+            print!("  {}", r.registry);
+            if let Some(ref note) = r.note {
+                print!("  ({note})");
+            }
+            println!("  [{}]", r.trusted_at);
+        }
+    }
+
+    if !args.registries_only && !state.pinned_skills.is_empty() {
+        if !state.trusted_registries.is_empty() {
+            println!();
+        }
+        println!("Pinned skills ({}):\n", state.pinned_skills.len());
+        for p in &state.pinned_skills {
+            let hash_display = if p.content_hash.len() > 17 {
+                format!("{}...", &p.content_hash[..17])
+            } else {
+                p.content_hash.clone()
+            };
+            println!(
+                "  {}/{} v{}  {}  [{}]",
+                p.owner, p.name, p.version, hash_display, p.pinned_at
+            );
+        }
+    }
+
+    ExitCode::SUCCESS
+}
+
+fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
+    let (owner, name) = match parse_skill_ref(&args.skill) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut cli_config = match config::load_config() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if args.registries.no_cache {
+        cli_config.cache.enabled = false;
+    }
+
+    let (skill_index, registry_paths) = match registry::load_registries(
+        &args.registries.registry,
+        &args.registries.remote,
+        &cli_config,
+        args.registries.subdir.as_deref(),
+    ) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error loading registries: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let entry = match skill_index
+        .skills
+        .get(&(owner.to_string(), name.to_string()))
+    {
+        Some(e) => e,
+        None => {
+            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            return ExitCode::from(1);
+        }
+    };
+
+    let version = match entry.latest() {
+        Some(v) => v,
+        None => {
+            eprintln!("Error: no available versions for {owner}/{name} (all yanked)");
+            return ExitCode::from(1);
+        }
+    };
+
+    let registry_id = if !registry_paths.is_empty() {
+        registry::registry_id(&registry_paths[0], &args.registries.remote)
+    } else {
+        "unknown".to_string()
+    };
+
+    let content_hash = integrity::sha256_hex(&version.skill_md);
+
+    let mut trust_state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    trust_state.pin_skill(owner, name, &version.version, &registry_id, &content_hash);
+
+    if let Err(e) = trust::save(&trust_state) {
+        eprintln!("Error saving trust state: {e}");
+        return ExitCode::from(1);
+    }
+
+    let hash_display = if content_hash.len() > 17 {
+        format!("{}...", &content_hash[..17])
+    } else {
+        content_hash.clone()
+    };
+    println!(
+        "Pinned {owner}/{name} v{} ({hash_display})",
+        version.version
+    );
+    ExitCode::SUCCESS
+}
+
+fn run_trust_unpin(args: TrustUnpinArgs) -> ExitCode {
+    let (owner, name) = match parse_skill_ref(&args.skill) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let mut state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    if !state.unpin_skill(owner, name) {
+        eprintln!("Skill '{owner}/{name}' is not pinned.");
+        return ExitCode::from(1);
+    }
+
+    if let Err(e) = trust::save(&state) {
+        eprintln!("Error saving trust state: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Unpinned {owner}/{name}");
+    ExitCode::SUCCESS
+}
+
+/// Run the `audit` subcommand.
+fn run_audit(args: AuditArgs) -> ExitCode {
+    let installed = match manifest::load() {
+        Ok(m) => m,
+        Err(e) => {
+            eprintln!("Error loading installation manifest: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let trust_state = match trust::load() {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("Error loading trust state: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let (filter_owner, filter_name) = if let Some(ref skill) = args.skill {
+        match parse_skill_ref(skill) {
+            Ok((o, n)) => (Some(o), Some(n)),
+            Err(e) => {
+                eprintln!("Error: {e}");
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        (None, None)
+    };
+
+    let results = trust::audit(&installed, &trust_state, filter_owner, filter_name);
+
+    if results.is_empty() {
+        println!("No installed skills to audit.");
+        return ExitCode::SUCCESS;
+    }
+
+    for r in &results {
+        println!(
+            "  [{status}] {owner}/{name} v{version} -> {path}",
+            status = r.status,
+            owner = r.owner,
+            name = r.name,
+            version = r.version,
+            path = r.installed_to.display(),
+        );
+    }
+
+    if trust::audit_has_problems(&results) {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 /// Print a safety report to stdout/stderr.

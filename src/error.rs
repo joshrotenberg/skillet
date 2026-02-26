@@ -45,6 +45,25 @@ pub enum Error {
     #[error("failed to serialize manifest: {0}")]
     ManifestSerialize(toml::ser::Error),
 
+    // -- Trust --
+    #[error("failed to read trust state at {path}: {source}")]
+    TrustRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to parse trust state at {path}: {source}")]
+    TrustParse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+    #[error("failed to write trust state to {path}: {source}")]
+    TrustWrite {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+    #[error("failed to serialize trust state: {0}")]
+    TrustSerialize(toml::ser::Error),
+
     // -- Install --
     #[error("failed to create directory {path}: {source}")]
     CreateDir {

@@ -20,5 +20,6 @@ pub mod safety;
 pub mod scaffold;
 pub mod search;
 pub mod state;
+pub mod trust;
 pub mod validate;
 pub mod version;

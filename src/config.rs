@@ -17,6 +17,7 @@ pub struct SkilletConfig {
     pub registries: RegistriesConfig,
     pub cache: CacheConfig,
     pub safety: SafetyConfig,
+    pub trust: TrustConfig,
 }
 
 /// `[safety]` section: rule suppression for safety scanning.
@@ -25,6 +26,26 @@ pub struct SkilletConfig {
 pub struct SafetyConfig {
     /// Rule IDs to suppress (e.g. `["exfiltration-curl"]`).
     pub suppress: Vec<String>,
+}
+
+/// `[trust]` section: trust tier and content hash pinning behavior.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TrustConfig {
+    /// Policy for skills from unknown (untrusted) registries.
+    /// "warn" (default), "prompt", or "block".
+    pub unknown_policy: String,
+    /// Automatically pin content hash on install.
+    pub auto_pin: bool,
+}
+
+impl Default for TrustConfig {
+    fn default() -> Self {
+        Self {
+            unknown_policy: "warn".to_string(),
+            auto_pin: true,
+        }
+    }
 }
 
 /// `[cache]` section: disk cache for the skill index.
