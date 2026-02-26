@@ -142,7 +142,7 @@ tags = ["rust", "cargo", "clippy", "fmt", "testing"]
 requires_tool_use = true
 requires_vision = false
 min_context_tokens = 4096
-required_tools = ["bash", "read", "write", "edit"]
+required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
 verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
 ```
 

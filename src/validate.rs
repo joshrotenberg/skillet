@@ -11,7 +11,7 @@ use anyhow::{Context, bail};
 
 use crate::index;
 use crate::integrity;
-use crate::state::{SkillFile, SkillMetadata};
+use crate::state::{KNOWN_CAPABILITIES, SkillFile, SkillMetadata};
 
 /// Result of validating a skillpack directory.
 #[derive(Debug)]
@@ -103,6 +103,18 @@ pub fn validate_skillpack(dir: &Path) -> anyhow::Result<ValidationResult> {
 
     // 7. Check SKILL.md frontmatter consistency (warning only)
     check_frontmatter_consistency(&skill_md, info, &mut warnings);
+
+    // 8. Warn on unknown capabilities (non-fatal for forward compatibility)
+    if let Some(ref compat) = info.compatibility {
+        for cap in &compat.required_capabilities {
+            if !KNOWN_CAPABILITIES.contains(&cap.as_str()) {
+                warnings.push(format!(
+                    "Unknown capability '{cap}'. Known capabilities: {}",
+                    KNOWN_CAPABILITIES.join(", ")
+                ));
+            }
+        }
+    }
 
     Ok(ValidationResult {
         owner: info.owner.clone(),

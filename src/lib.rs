@@ -6,6 +6,7 @@
 
 pub mod bm25;
 pub mod config;
+pub mod error;
 pub mod git;
 pub mod index;
 pub mod install;
