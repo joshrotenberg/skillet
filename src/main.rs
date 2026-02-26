@@ -1492,7 +1492,7 @@ fn print_safety_report(report: &safety::SafetyReport) {
 }
 
 /// All known tool short names.
-const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "install"];
+const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "install", "info"];
 
 /// All known resource short names.
 const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files"];
@@ -1552,6 +1552,9 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
     if caps.tools.contains("install") {
         router = router.tool(tools::install_skill::build(state.clone()));
     }
+    if caps.tools.contains("info") {
+        router = router.tool(tools::info_skill::build(state.clone()));
+    }
 
     // Register resources conditionally
     if caps.resources.contains("skills") {
@@ -1592,6 +1595,11 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
     if caps.tools.contains("install") {
         tool_lines
             .push("- install_skill: Install a skill to the local filesystem for persistent use");
+    }
+    if caps.tools.contains("info") {
+        tool_lines.push(
+            "- info_skill: Get detailed information about a specific skill (version, author, tags, files, etc.)",
+        );
     }
     if !tool_lines.is_empty() {
         text.push_str("Tools:\n");
