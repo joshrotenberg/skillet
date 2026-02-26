@@ -18,6 +18,23 @@ pub struct SkilletConfig {
     pub cache: CacheConfig,
     pub safety: SafetyConfig,
     pub trust: TrustConfig,
+    pub server: ServerConfig,
+}
+
+/// `[server]` section: MCP server tool/resource exposure control.
+///
+/// Empty lists (the default) mean "expose all". When non-empty, only the
+/// listed capabilities are registered. Short names are used:
+///
+/// Tools: `search`, `categories`, `owner`, `install`
+/// Resources: `skills`, `metadata`, `files`
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ServerConfig {
+    /// Tool short names to expose. Empty = all.
+    pub tools: Vec<String>,
+    /// Resource short names to expose. Empty = all.
+    pub resources: Vec<String>,
 }
 
 /// `[safety]` section: rule suppression for safety scanning.
@@ -475,5 +492,49 @@ targets = ["gemini"]
         let flags = vec!["claude".to_string(), "claude".to_string()];
         let targets = resolve_targets(&flags, &config).unwrap();
         assert_eq!(targets, vec![InstallTarget::Claude]);
+    }
+
+    #[test]
+    fn test_server_config_defaults_empty() {
+        let config = SkilletConfig::default();
+        assert!(config.server.tools.is_empty());
+        assert!(config.server.resources.is_empty());
+    }
+
+    #[test]
+    fn test_server_config_missing_section_defaults() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[install]
+targets = ["claude"]
+"#,
+        )
+        .unwrap();
+
+        let config = load_config_from(&path).unwrap();
+        assert!(config.server.tools.is_empty());
+        assert!(config.server.resources.is_empty());
+    }
+
+    #[test]
+    fn test_server_config_parses() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+tools = ["search", "categories"]
+resources = ["skills", "metadata"]
+"#,
+        )
+        .unwrap();
+
+        let config = load_config_from(&path).unwrap();
+        assert_eq!(config.server.tools, vec!["search", "categories"]);
+        assert_eq!(config.server.resources, vec!["skills", "metadata"]);
     }
 }
