@@ -1047,9 +1047,22 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         registry_paths.push(path);
     }
 
-    // Default to local test-registry if nothing specified
-    if registry_paths.is_empty() {
-        registry_paths.push(PathBuf::from("test-registry"));
+    // Fall back to the official registry if nothing is configured
+    let mut default_remote_urls = Vec::new();
+    if registry_paths.is_empty() && args.remote.is_empty() {
+        let url = registry::DEFAULT_REGISTRY_URL;
+        let target = cache_dir_for_url(&cache_base, url);
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        git::clone_or_pull(url, &target)?;
+        let path = match &args.subdir {
+            Some(sub) => target.join(sub),
+            None => target,
+        };
+        tracing::info!(registry = %path.display(), remote = %url, "Using default registry");
+        registry_paths.push(path);
+        default_remote_urls.push(url.to_string());
     }
 
     tracing::info!(count = registry_paths.len(), "Starting skillet server");
@@ -1068,10 +1081,11 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     }
 
     let skill_search = search::SkillSearch::build(&merged_index);
-    let remote_urls = args.remote.clone();
+    let mut remote_urls = args.remote.clone();
+    remote_urls.extend(default_remote_urls);
     let state = AppState::new(
         registry_paths,
-        remote_urls,
+        remote_urls.clone(),
         merged_index,
         skill_search,
         config,
@@ -1080,7 +1094,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     // Spawn background refresh tasks for each remote
     let interval = parse_duration(&args.refresh_interval)?;
     if interval > Duration::ZERO {
-        for url in args.remote {
+        for url in remote_urls {
             spawn_refresh_task(Arc::clone(&state), url, interval);
         }
     }

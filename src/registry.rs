@@ -8,6 +8,9 @@ use crate::config::SkilletConfig;
 use crate::state::SkillIndex;
 use crate::{git, index};
 
+/// The official default registry, used when no registries are configured.
+pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet-registry.git";
+
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
 pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
     let s = s.trim();
@@ -208,12 +211,14 @@ pub fn load_registries(
         (locals, remotes)
     };
 
-    if local_paths.is_empty() && remote_urls.is_empty() {
-        anyhow::bail!(
-            "No registries configured. Use --registry, --remote, \
-             or add registries to ~/.config/skillet/config.toml"
-        );
-    }
+    // Fall back to the official registry if nothing is configured
+    let default_remote;
+    let remote_urls = if local_paths.is_empty() && remote_urls.is_empty() {
+        default_remote = DEFAULT_REGISTRY_URL.to_string();
+        vec![default_remote.as_str()]
+    } else {
+        remote_urls
+    };
 
     let cache_base = default_cache_dir();
     let mut registry_paths = Vec::new();
