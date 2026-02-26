@@ -146,6 +146,7 @@ content via resource templates.
 | `search_skills` | Full-text search with category, tag, and model filters |
 | `list_categories` | Browse all skill categories |
 | `list_skills_by_owner` | List everything by one publisher |
+| `install_skill` | Install a skill to the local filesystem for persistent use |
 | `skillet://skills/{owner}/{name}` | Fetch SKILL.md content (latest version) |
 | `skillet://skills/{owner}/{name}/{version}` | Fetch a specific version |
 | `skillet://metadata/{owner}/{name}` | Fetch skill.toml metadata |
