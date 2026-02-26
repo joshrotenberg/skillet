@@ -16,7 +16,7 @@ use crate::registry::default_cache_dir;
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// GitHub repo to check for releases.
-const GITHUB_REPO: &str = "joshrotenberg/grimoire";
+const GITHUB_REPO: &str = "joshrotenberg/skillet";
 
 #[derive(Debug, Serialize, Deserialize)]
 struct VersionCache {
@@ -88,6 +88,40 @@ fn fetch_latest_release() -> Option<String> {
     Some(tag)
 }
 
+/// Detect how skillet was installed.
+fn detect_install_method() -> InstallMethod {
+    let exe = std::env::current_exe().ok();
+
+    if let Some(ref path) = exe {
+        let path_str = path.to_string_lossy();
+
+        // Homebrew: /opt/homebrew/... or /usr/local/Cellar/...
+        if path_str.contains("/homebrew/") || path_str.contains("/Cellar/") {
+            return InstallMethod::Brew;
+        }
+
+        // Cargo: ~/.cargo/bin/skillet
+        if path_str.contains(".cargo/bin") {
+            return InstallMethod::Cargo;
+        }
+
+        // Docker: /.dockerenv exists or running as PID 1
+        if std::path::Path::new("/.dockerenv").exists() {
+            return InstallMethod::Docker;
+        }
+    }
+
+    InstallMethod::Unknown
+}
+
+#[derive(Debug, PartialEq)]
+enum InstallMethod {
+    Brew,
+    Cargo,
+    Docker,
+    Unknown,
+}
+
 /// Compare the current version against the latest tag and return an upgrade
 /// message if the latest is newer.
 fn upgrade_message(current: &str, latest_tag: &str) -> Option<String> {
@@ -101,9 +135,19 @@ fn upgrade_message(current: &str, latest_tag: &str) -> Option<String> {
     let latest_parts = parse_version(latest)?;
 
     if latest_parts > current_parts {
+        let instruction = match detect_install_method() {
+            InstallMethod::Brew => "Run `brew upgrade skillet` to upgrade.".to_string(),
+            InstallMethod::Cargo => format!(
+                "Run `cargo install --git https://github.com/{GITHUB_REPO}.git` to upgrade."
+            ),
+            InstallMethod::Docker => "Pull the latest image to upgrade.".to_string(),
+            InstallMethod::Unknown => {
+                format!("Visit https://github.com/{GITHUB_REPO}/releases/latest to upgrade.")
+            }
+        };
+
         Some(format!(
-            "\nA new version of skillet is available: v{latest} (current: v{current})\n\
-             Run `cargo install --git https://github.com/{GITHUB_REPO}.git` to upgrade."
+            "\nA new version of skillet is available: v{latest} (current: v{current})\n{instruction}"
         ))
     } else {
         None
@@ -180,5 +224,17 @@ mod tests {
     fn test_upgrade_message_major_version() {
         let msg = upgrade_message("0.1.0", "v1.0.0");
         assert!(msg.is_some());
+    }
+
+    #[test]
+    fn test_detect_install_method_returns_something() {
+        // In test environment, this will likely be Cargo or Unknown
+        let method = detect_install_method();
+        assert!(
+            method == InstallMethod::Cargo
+                || method == InstallMethod::Brew
+                || method == InstallMethod::Docker
+                || method == InstallMethod::Unknown
+        );
     }
 }

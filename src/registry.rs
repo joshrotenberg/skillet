@@ -77,7 +77,7 @@ pub fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
     let readme = format!(
         "# {name}\n\
          \n\
-         A skill registry for [skillet](https://github.com/joshrotenberg/grimoire).\n\
+         A skill registry for [skillet](https://github.com/joshrotenberg/skillet).\n\
          \n\
          ## Adding skills\n\
          \n\
