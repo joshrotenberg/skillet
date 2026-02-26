@@ -1560,7 +1560,15 @@ fn print_safety_report(report: &safety::SafetyReport) {
 }
 
 /// All known tool short names.
-const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "install", "info"];
+const ALL_TOOL_NAMES: &[&str] = &[
+    "search",
+    "categories",
+    "owner",
+    "install",
+    "info",
+    "compare",
+    "status",
+];
 
 /// All known resource short names.
 const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files"];
@@ -1623,6 +1631,12 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
     if caps.tools.contains("info") {
         router = router.tool(tools::info_skill::build(state.clone()));
     }
+    if caps.tools.contains("compare") {
+        router = router.tool(tools::compare_skills::build(state.clone()));
+    }
+    if caps.tools.contains("status") {
+        router = router.tool(tools::skill_status::build(state.clone()));
+    }
 
     // Register resources conditionally
     if caps.resources.contains("skills") {
@@ -1667,6 +1681,16 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
     if caps.tools.contains("info") {
         tool_lines.push(
             "- info_skill: Get detailed information about a specific skill (version, author, tags, files, etc.)",
+        );
+    }
+    if caps.tools.contains("compare") {
+        tool_lines.push(
+            "- compare_skills: Compare two skills side-by-side (overlap, differences, content)",
+        );
+    }
+    if caps.tools.contains("status") {
+        tool_lines.push(
+            "- skill_status: Show installed skill status (version, integrity, trust, updates available)",
         );
     }
     if !tool_lines.is_empty() {
@@ -2177,6 +2201,8 @@ mod tests {
         assert!(names.contains(&"list_skills_by_owner"));
         assert!(names.contains(&"install_skill"));
         assert!(names.contains(&"info_skill"));
+        assert!(names.contains(&"compare_skills"));
+        assert!(names.contains(&"skill_status"));
     }
 
     #[tokio::test]
@@ -3379,5 +3405,205 @@ mod tests {
         assert!(names.contains(&"list_categories"));
         assert!(!names.contains(&"install_skill"));
         assert!(!names.contains(&"list_skills_by_owner"));
+        assert!(!names.contains(&"compare_skills"));
+        assert!(!names.contains(&"skill_status"));
+    }
+
+    // ── compare_skills tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "compare_skills",
+                serde_json::json!({
+                    "owner_a": "joshrotenberg",
+                    "name_a": "rust-dev",
+                    "owner_b": "acme",
+                    "name_b": "python-dev"
+                }),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(text.contains("Comparison"));
+        assert!(text.contains("joshrotenberg/rust-dev"));
+        assert!(text.contains("acme/python-dev"));
+        assert!(text.contains("Version"));
+        assert!(text.contains("Description"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills_shared_category() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Compare two skills that share the "development" category
+        let result = client
+            .call_tool(
+                "compare_skills",
+                serde_json::json!({
+                    "owner_a": "joshrotenberg",
+                    "name_a": "rust-dev",
+                    "owner_b": "acme",
+                    "name_b": "python-dev"
+                }),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        // Both skills have "development" category
+        assert!(
+            text.contains("development"),
+            "should show shared development category"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills_not_found() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "compare_skills",
+                serde_json::json!({
+                    "owner_a": "nonexistent",
+                    "name_a": "skill",
+                    "owner_b": "joshrotenberg",
+                    "name_b": "rust-dev"
+                }),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.all_text().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills_second_not_found() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "compare_skills",
+                serde_json::json!({
+                    "owner_a": "joshrotenberg",
+                    "name_a": "rust-dev",
+                    "owner_b": "nonexistent",
+                    "name_b": "skill"
+                }),
+            )
+            .await;
+
+        assert!(result.is_error);
+        assert!(result.all_text().contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills_content_size() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "compare_skills",
+                serde_json::json!({
+                    "owner_a": "joshrotenberg",
+                    "name_a": "rust-dev",
+                    "owner_b": "acme",
+                    "name_b": "python-dev"
+                }),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(text.contains("Content"), "should have Content section");
+        assert!(text.contains("bytes"), "should show content size in bytes");
+    }
+
+    // ── skill_status tests ───────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_skill_status_no_installs() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // skill_status reads from the installed manifest on disk.
+        // In test context there are no installed skills, so it should report empty.
+        let result = client
+            .call_tool("skill_status", serde_json::json!({}))
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("No skills installed") || text.contains("Installed Skills"),
+            "should show no installs or installed skills: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_skill_status_with_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "skill_status",
+                serde_json::json!({"owner": "nonexistent", "name": "skill"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        assert!(!result.is_error);
+        assert!(
+            text.contains("No installed skill matching"),
+            "should indicate no match: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_compare_skills_excluded_when_not_in_caps() {
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let skill_index = index::load_index(&registry_path).expect("load index");
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ["search"].iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let tools = client.list_tools().await;
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(!names.contains(&"compare_skills"));
+        assert!(!names.contains(&"skill_status"));
     }
 }
