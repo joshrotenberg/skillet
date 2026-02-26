@@ -21,7 +21,7 @@ use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::manifest;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
-use skillet_mcp::{git, index, pack, publish, registry, scaffold, search, state, validate};
+use skillet_mcp::{git, index, pack, publish, registry, safety, scaffold, search, state, validate};
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
@@ -100,12 +100,20 @@ struct ServeArgs {
 struct ValidateArgs {
     /// Path to the skillpack directory to validate
     path: PathBuf,
+
+    /// Skip safety scanning
+    #[arg(long)]
+    skip_safety: bool,
 }
 
 #[derive(clap::Args, Debug)]
 struct PackArgs {
     /// Path to the skillpack directory
     path: PathBuf,
+
+    /// Skip safety scanning
+    #[arg(long)]
+    skip_safety: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -152,6 +160,10 @@ struct PublishArgs {
     /// Validate and show what would happen without creating a PR
     #[arg(long)]
     dry_run: bool,
+
+    /// Skip safety scanning
+    #[arg(long)]
+    skip_safety: bool,
 }
 
 /// Shared registry source arguments for CLI subcommands.
@@ -336,6 +348,28 @@ fn run_validate(args: ValidateArgs) -> ExitCode {
         }
     }
 
+    // Safety scanning
+    if !args.skip_safety {
+        let cli_config = config::load_config().unwrap_or_default();
+        let report = safety::scan(
+            &result.skill_md,
+            &result.skill_toml_raw,
+            &result.files,
+            &result.metadata,
+            &cli_config.safety.suppress,
+        );
+
+        if !report.is_empty() {
+            println!();
+            print_safety_report(&report);
+        }
+
+        if report.has_danger() {
+            eprintln!("\nValidation failed: safety issues detected.");
+            return ExitCode::from(2);
+        }
+    }
+
     println!("\nValidation passed.");
     ExitCode::SUCCESS
 }
@@ -369,6 +403,28 @@ fn run_pack(args: PackArgs) -> ExitCode {
         println!("  versions.toml ......... up to date");
     }
 
+    // Safety scanning
+    if !args.skip_safety {
+        let cli_config = config::load_config().unwrap_or_default();
+        let report = safety::scan(
+            &v.skill_md,
+            &v.skill_toml_raw,
+            &v.files,
+            &v.metadata,
+            &cli_config.safety.suppress,
+        );
+
+        if !report.is_empty() {
+            println!();
+            print_safety_report(&report);
+        }
+
+        if report.has_danger() {
+            eprintln!("\nPack failed: safety issues detected.");
+            return ExitCode::from(2);
+        }
+    }
+
     println!("\nPack succeeded.");
     ExitCode::SUCCESS
 }
@@ -391,6 +447,28 @@ fn run_publish(args: PublishArgs) -> ExitCode {
     println!("  owner ................. {}", v.owner);
     println!("  name .................. {}", v.name);
     println!("  version ............... {}", v.version);
+
+    // Safety scanning
+    if !args.skip_safety {
+        let cli_config = config::load_config().unwrap_or_default();
+        let report = safety::scan(
+            &v.skill_md,
+            &v.skill_toml_raw,
+            &v.files,
+            &v.metadata,
+            &cli_config.safety.suppress,
+        );
+
+        if !report.is_empty() {
+            println!();
+            print_safety_report(&report);
+        }
+
+        if report.has_danger() {
+            eprintln!("\nPublish failed: safety issues detected.");
+            return ExitCode::from(2);
+        }
+    }
 
     if args.dry_run {
         println!("\nDry run complete.");
@@ -649,6 +727,21 @@ fn run_install(args: InstallArgs) -> ExitCode {
             s = if file_count == 1 { "" } else { "s" },
             path = r.path.display(),
         );
+    }
+
+    // Safety scanning (informational only -- never blocks install)
+    let cli_config = config::load_config().unwrap_or_default();
+    let report = safety::scan(
+        &version.skill_md,
+        &version.skill_toml_raw,
+        &version.files,
+        &version.metadata,
+        &cli_config.safety.suppress,
+    );
+
+    if !report.is_empty() {
+        println!();
+        print_safety_report(&report);
     }
 
     ExitCode::SUCCESS
@@ -938,6 +1031,33 @@ fn run_list(_args: ListArgs) -> ExitCode {
     }
 
     ExitCode::SUCCESS
+}
+
+/// Print a safety report to stdout/stderr.
+fn print_safety_report(report: &safety::SafetyReport) {
+    let danger_count = report
+        .findings
+        .iter()
+        .filter(|f| f.severity == safety::Severity::Danger)
+        .count();
+    let warning_count = report
+        .findings
+        .iter()
+        .filter(|f| f.severity == safety::Severity::Warning)
+        .count();
+
+    println!("Safety scan: {danger_count} danger, {warning_count} warning\n");
+
+    for f in &report.findings {
+        let line_info = match f.line {
+            Some(n) => format!("{}:{n}", f.file),
+            None => f.file.clone(),
+        };
+        println!("  [{severity}] {line_info}", severity = f.severity);
+        println!("    rule: {}", f.rule_id);
+        println!("    {}", f.message);
+        println!("    matched: {}", f.matched);
+    }
 }
 
 /// Build an MCP router from a loaded AppState.

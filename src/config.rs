@@ -16,6 +16,15 @@ pub struct SkilletConfig {
     pub install: InstallConfig,
     pub registries: RegistriesConfig,
     pub cache: CacheConfig,
+    pub safety: SafetyConfig,
+}
+
+/// `[safety]` section: rule suppression for safety scanning.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SafetyConfig {
+    /// Rule IDs to suppress (e.g. `["exfiltration-curl"]`).
+    pub suppress: Vec<String>,
 }
 
 /// `[cache]` section: disk cache for the skill index.

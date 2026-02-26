@@ -9,9 +9,10 @@ use tower_mcp::{
     extract::{Json, State},
 };
 
-use skillet_mcp::config::{ALL_TARGETS, InstallTarget};
+use skillet_mcp::config::{self, ALL_TARGETS, InstallTarget};
 use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::manifest;
+use skillet_mcp::safety;
 use skillet_mcp::state::AppState;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -138,6 +139,46 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     "\nThe skill is now installed. \
                      A restart may be required for the agent to pick it up.",
                 );
+
+                // Safety scan (informational -- never blocks install via MCP)
+                let cli_config = config::load_config().unwrap_or_default();
+                let report = safety::scan(
+                    &version.skill_md,
+                    &version.skill_toml_raw,
+                    &version.files,
+                    &version.metadata,
+                    &cli_config.safety.suppress,
+                );
+
+                if !report.is_empty() {
+                    let danger_count = report
+                        .findings
+                        .iter()
+                        .filter(|f| f.severity == safety::Severity::Danger)
+                        .count();
+                    let warning_count = report
+                        .findings
+                        .iter()
+                        .filter(|f| f.severity == safety::Severity::Warning)
+                        .count();
+
+                    output.push_str(&format!(
+                        "\n\n**Safety scan**: {danger_count} danger, {warning_count} warning\n"
+                    ));
+
+                    for f in &report.findings {
+                        let line_info = match f.line {
+                            Some(n) => format!("{}:{n}", f.file),
+                            None => f.file.clone(),
+                        };
+                        output.push_str(&format!(
+                            "\n- **[{severity}]** {line_info}: {msg} (`{matched}`)",
+                            severity = f.severity,
+                            msg = f.message,
+                            matched = f.matched,
+                        ));
+                    }
+                }
 
                 Ok(CallToolResult::text(output))
             },

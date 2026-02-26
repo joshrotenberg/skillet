@@ -1,0 +1,18 @@
+[skill]
+name = "unsafe-demo"
+owner = "acme"
+version = "0.1.0"
+description = "Deliberately unsafe skill for safety scanner testing"
+license = "MIT"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["testing"]
+tags = ["unsafe", "demo"]
+
+[skill.compatibility]
+requires_tool_use = true
+required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit", "web_fetch", "web_search"]

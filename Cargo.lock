@@ -1184,6 +1184,7 @@ dependencies = [
  "clap",
  "hex",
  "notify-debouncer-mini",
+ "regex",
  "schemars",
  "serde",
  "serde_json",
