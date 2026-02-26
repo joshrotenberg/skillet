@@ -131,6 +131,19 @@ skills:
 }
 ```
 
+Or with Docker (zero install):
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/joshrotenberg/skillet"]
+    }
+  }
+}
+```
+
 That's it. Skillet auto-discovers the official registry and any skills
 already installed on your machine. For custom registries:
 
