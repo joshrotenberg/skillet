@@ -436,3 +436,137 @@ fn init_registry_fails_on_existing_dir() {
         .failure()
         .stderr(predicate::str::contains("already exists"));
 }
+
+// ── Setup ───────────────────────────────────────────────────────────
+
+#[test]
+fn setup_creates_config() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["setup"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("config.toml")
+                .and(predicate::str::contains("mcpServers"))
+                .and(predicate::str::contains("[install]")),
+        );
+
+    let config_path = home.join(".config/skillet/config.toml");
+    assert!(
+        config_path.exists(),
+        "config.toml should be written at {}",
+        config_path.display()
+    );
+}
+
+#[test]
+fn setup_refuses_overwrite() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // First run succeeds
+    skillet()
+        .args(["setup"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    // Second run without --force fails
+    skillet()
+        .args(["setup"])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("already exists").and(predicate::str::contains("--force")),
+        );
+}
+
+#[test]
+fn setup_force_overwrites() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // First run
+    skillet()
+        .args(["setup"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    // Second run with --force succeeds
+    skillet()
+        .args(["setup", "--force"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+}
+
+#[test]
+fn setup_custom_target() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["setup", "--target", "claude"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("claude"));
+
+    let content =
+        std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
+    assert!(
+        content.contains("claude"),
+        "config should contain 'claude': {content}"
+    );
+}
+
+#[test]
+fn setup_custom_remote() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["setup", "--remote", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("https://example.com/repo.git"));
+
+    let content =
+        std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
+    assert!(
+        content.contains("https://example.com/repo.git"),
+        "config should contain custom remote: {content}"
+    );
+}
+
+#[test]
+fn setup_no_official_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["setup", "--no-official-registry"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    let content =
+        std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
+    assert!(
+        !content.contains("skillet-registry"),
+        "config should NOT contain official registry URL: {content}"
+    );
+}

@@ -68,6 +68,8 @@ enum Command {
     Trust(TrustArgs),
     /// Audit installed skills against pinned content hashes
     Audit(AuditArgs),
+    /// Generate initial configuration
+    Setup(SetupArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -340,6 +342,29 @@ struct AuditArgs {
     skill: Option<String>,
 }
 
+#[derive(clap::Args, Debug)]
+struct SetupArgs {
+    /// Git URL of a remote registry to add (can be specified multiple times)
+    #[arg(long)]
+    remote: Vec<String>,
+
+    /// Path to a local registry directory (can be specified multiple times)
+    #[arg(long)]
+    registry: Vec<PathBuf>,
+
+    /// Default install target (agents, claude, cursor, copilot, windsurf, gemini, all)
+    #[arg(long, default_value = "agents")]
+    target: String,
+
+    /// Skip adding the official registry as a remote
+    #[arg(long)]
+    no_official_registry: bool,
+
+    /// Overwrite existing config file
+    #[arg(long)]
+    force: bool,
+}
+
 #[tokio::main]
 async fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -359,6 +384,7 @@ async fn main() -> ExitCode {
         Some(Command::List(args)) => run_list(args),
         Some(Command::Trust(args)) => run_trust(args),
         Some(Command::Audit(args)) => run_audit(args),
+        Some(Command::Setup(args)) => run_setup(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     };
@@ -1530,6 +1556,61 @@ fn run_audit(args: AuditArgs) -> ExitCode {
     } else {
         ExitCode::SUCCESS
     }
+}
+
+/// Run the `setup` subcommand.
+fn run_setup(args: SetupArgs) -> ExitCode {
+    let config_path = config::config_dir().join("config.toml");
+
+    // Check for existing config
+    if config_path.exists() && !args.force {
+        eprintln!(
+            "Config already exists at {}\nUse --force to overwrite.",
+            config_path.display()
+        );
+        return ExitCode::from(1);
+    }
+
+    // Build remotes list: official first (unless opted out), then user-provided
+    let mut remotes = Vec::new();
+    if !args.no_official_registry {
+        remotes.push(registry::DEFAULT_REGISTRY_URL.to_string());
+    }
+    remotes.extend(args.remote);
+
+    let config = match config::generate_default_config(remotes, args.registry, &args.target) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    let path = match config::write_config(&config) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("Error writing config: {e}");
+            return ExitCode::from(1);
+        }
+    };
+
+    // Read back the written content to display
+    let content = std::fs::read_to_string(&path).unwrap_or_default();
+
+    println!("Wrote {}\n", path.display());
+    println!("{content}");
+    println!(
+        "To use skillet with your agent, add this to your MCP config:\n\n\
+         {{\n  \"mcpServers\": {{\n    \"skillet\": {{\n      \"command\": \"skillet\"\n    }}\n  }}\n}}"
+    );
+    println!(
+        "\nNext steps:\n  \
+         skillet search *            # browse available skills\n  \
+         skillet info owner/name     # see skill details\n  \
+         skillet install owner/name  # install a skill"
+    );
+
+    ExitCode::SUCCESS
 }
 
 /// Print a safety report to stdout/stderr.
