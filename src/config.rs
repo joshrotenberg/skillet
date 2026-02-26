@@ -7,6 +7,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::error::Error;
+
 /// Top-level skillet CLI configuration.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -63,7 +65,7 @@ pub const ALL_TARGETS: &[InstallTarget] = &[
 
 impl InstallTarget {
     /// Parse a target string. Returns `Ok(None)` for "all" (caller expands).
-    pub fn parse(s: &str) -> anyhow::Result<Option<Self>> {
+    pub fn parse(s: &str) -> crate::error::Result<Option<Self>> {
         match s.to_lowercase().as_str() {
             "all" => Ok(None),
             "agents" => Ok(Some(Self::Agents)),
@@ -72,10 +74,10 @@ impl InstallTarget {
             "copilot" => Ok(Some(Self::Copilot)),
             "windsurf" => Ok(Some(Self::Windsurf)),
             "gemini" => Ok(Some(Self::Gemini)),
-            other => anyhow::bail!(
+            other => Err(Error::Config(format!(
                 "Unknown install target: {other}. \
                  Valid targets: agents, claude, cursor, copilot, windsurf, gemini, all"
-            ),
+            ))),
         }
     }
 
@@ -126,7 +128,7 @@ impl std::fmt::Display for InstallTarget {
 /// Load CLI configuration from `~/.config/skillet/config.toml`.
 ///
 /// Returns defaults if the file is absent. Errors if present but malformed.
-pub fn load_config() -> anyhow::Result<SkilletConfig> {
+pub fn load_config() -> crate::error::Result<SkilletConfig> {
     let path = config_dir().join("config.toml");
     if !path.is_file() {
         return Ok(SkilletConfig::default());
@@ -135,11 +137,15 @@ pub fn load_config() -> anyhow::Result<SkilletConfig> {
 }
 
 /// Load CLI configuration from a specific path (for testing).
-pub fn load_config_from(path: &Path) -> anyhow::Result<SkilletConfig> {
-    let raw = std::fs::read_to_string(path)
-        .map_err(|e| anyhow::anyhow!("Failed to read {}: {e}", path.display()))?;
-    let config: SkilletConfig = toml::from_str(&raw)
-        .map_err(|e| anyhow::anyhow!("Failed to parse {}: {e}", path.display()))?;
+pub fn load_config_from(path: &Path) -> crate::error::Result<SkilletConfig> {
+    let raw = std::fs::read_to_string(path).map_err(|e| Error::ConfigRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let config: SkilletConfig = toml::from_str(&raw).map_err(|e| Error::ConfigParse {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
     Ok(config)
 }
 
@@ -149,7 +155,7 @@ pub fn load_config_from(path: &Path) -> anyhow::Result<SkilletConfig> {
 pub fn resolve_targets(
     flag_targets: &[String],
     config: &SkilletConfig,
-) -> anyhow::Result<Vec<InstallTarget>> {
+) -> crate::error::Result<Vec<InstallTarget>> {
     let raw = if !flag_targets.is_empty() {
         flag_targets
     } else if !config.install.targets.is_empty() {

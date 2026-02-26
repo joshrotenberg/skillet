@@ -18,6 +18,6 @@ tags = ["code-review", "pr", "quality", "best-practices"]
 requires_tool_use = true
 requires_vision = false
 min_context_tokens = 8192
-required_tools = ["bash", "read"]
+required_capabilities = ["shell_exec", "file_read"]
 required_mcp_servers = []
 verified_with = ["claude-opus-4-6"]

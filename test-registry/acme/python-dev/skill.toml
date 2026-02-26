@@ -18,6 +18,6 @@ tags = ["python", "mypy", "ruff", "pytest", "type-hints"]
 requires_tool_use = true
 requires_vision = false
 min_context_tokens = 4096
-required_tools = ["bash", "read", "write", "edit"]
+required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
 required_mcp_servers = []
 verified_with = ["claude-sonnet-4-6"]

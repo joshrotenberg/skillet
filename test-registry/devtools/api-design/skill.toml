@@ -18,6 +18,6 @@ tags = ["api", "rest", "grpc", "openapi", "http", "design"]
 requires_tool_use = true
 requires_vision = false
 min_context_tokens = 4096
-required_tools = ["read", "write", "edit"]
+required_capabilities = ["file_read", "file_write", "file_edit"]
 required_mcp_servers = []
 verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

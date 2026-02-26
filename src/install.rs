@@ -6,27 +6,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::config::{self, InstallTarget};
+use crate::error::Error;
 use crate::index::EXTRA_DIRS;
 use crate::integrity;
 use crate::manifest::{InstalledManifest, InstalledSkill};
 use crate::state::SkillVersion;
-
-/// Errors that can occur during skill installation.
-#[derive(Debug, thiserror::Error)]
-pub enum InstallError {
-    #[error("failed to create directory {path}: {source}")]
-    CreateDir {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to write {path}: {source}")]
-    WriteFile {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to resolve current directory: {0}")]
-    CurrentDir(std::io::Error),
-}
 
 /// Options controlling how a skill is installed.
 pub struct InstallOptions {
@@ -54,8 +38,8 @@ pub fn install_skill(
     version: &SkillVersion,
     options: &InstallOptions,
     manifest: &mut InstalledManifest,
-) -> Result<Vec<InstallResult>, InstallError> {
-    let cwd = std::env::current_dir().map_err(InstallError::CurrentDir)?;
+) -> crate::error::Result<Vec<InstallResult>> {
+    let cwd = std::env::current_dir().map_err(Error::CurrentDir)?;
     let checksum = integrity::sha256_hex(&version.skill_md);
     let now = config::now_iso8601();
     let mut results = Vec::new();
@@ -101,8 +85,8 @@ pub fn install_skill(
 /// Writes SKILL.md and any extra files (scripts/, references/, assets/).
 /// Does NOT write skill.toml, MANIFEST.sha256, or versions.toml.
 /// Returns the list of relative paths written.
-fn write_skill_to_dir(version: &SkillVersion, dir: &Path) -> Result<Vec<String>, InstallError> {
-    std::fs::create_dir_all(dir).map_err(|e| InstallError::CreateDir {
+fn write_skill_to_dir(version: &SkillVersion, dir: &Path) -> crate::error::Result<Vec<String>> {
+    std::fs::create_dir_all(dir).map_err(|e| Error::CreateDir {
         path: dir.to_path_buf(),
         source: e,
     })?;
@@ -111,7 +95,7 @@ fn write_skill_to_dir(version: &SkillVersion, dir: &Path) -> Result<Vec<String>,
 
     // Write SKILL.md
     let skill_md_path = dir.join("SKILL.md");
-    std::fs::write(&skill_md_path, &version.skill_md).map_err(|e| InstallError::WriteFile {
+    std::fs::write(&skill_md_path, &version.skill_md).map_err(|e| Error::WriteFile {
         path: skill_md_path,
         source: e,
     })?;
@@ -128,13 +112,13 @@ fn write_skill_to_dir(version: &SkillVersion, dir: &Path) -> Result<Vec<String>,
             if !EXTRA_DIRS.contains(&subdir) {
                 continue;
             }
-            std::fs::create_dir_all(parent).map_err(|e| InstallError::CreateDir {
+            std::fs::create_dir_all(parent).map_err(|e| Error::CreateDir {
                 path: parent.to_path_buf(),
                 source: e,
             })?;
         }
 
-        std::fs::write(&target_path, &file.content).map_err(|e| InstallError::WriteFile {
+        std::fs::write(&target_path, &file.content).map_err(|e| Error::WriteFile {
             path: target_path,
             source: e,
         })?;

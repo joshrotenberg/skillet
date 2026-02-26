@@ -115,7 +115,7 @@ mod tests {
                             requires_tool_use: None,
                             requires_vision: None,
                             min_context_tokens: None,
-                            required_tools: Vec::new(),
+                            required_capabilities: Vec::new(),
                             required_mcp_servers: Vec::new(),
                             verified_with: vec!["claude-opus-4-6".to_string()],
                         }),

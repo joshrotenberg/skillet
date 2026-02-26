@@ -8,34 +8,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
+use crate::error::Error;
 use crate::integrity;
-
-/// Errors that can occur when working with the installation manifest.
-#[derive(Debug, thiserror::Error)]
-pub enum ManifestError {
-    #[error("failed to read manifest at {path}: {source}")]
-    Read {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to parse manifest at {path}: {source}")]
-    Parse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-    #[error("failed to write manifest to {path}: {source}")]
-    Write {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to serialize manifest: {0}")]
-    Serialize(#[from] toml::ser::Error),
-    #[error("failed to create directory {path}: {source}")]
-    CreateDir {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-}
 
 /// The installation manifest file.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -73,20 +47,20 @@ pub fn manifest_path() -> PathBuf {
 }
 
 /// Load the installation manifest, returning empty if the file is absent.
-pub fn load() -> Result<InstalledManifest, ManifestError> {
+pub fn load() -> crate::error::Result<InstalledManifest> {
     load_from(&manifest_path())
 }
 
 /// Load the installation manifest from a specific path.
-pub fn load_from(path: &Path) -> Result<InstalledManifest, ManifestError> {
+pub fn load_from(path: &Path) -> crate::error::Result<InstalledManifest> {
     if !path.is_file() {
         return Ok(InstalledManifest::default());
     }
-    let raw = std::fs::read_to_string(path).map_err(|e| ManifestError::Read {
+    let raw = std::fs::read_to_string(path).map_err(|e| Error::ManifestRead {
         path: path.to_path_buf(),
         source: e,
     })?;
-    let manifest: InstalledManifest = toml::from_str(&raw).map_err(|e| ManifestError::Parse {
+    let manifest: InstalledManifest = toml::from_str(&raw).map_err(|e| Error::ManifestParse {
         path: path.to_path_buf(),
         source: e,
     })?;
@@ -94,20 +68,20 @@ pub fn load_from(path: &Path) -> Result<InstalledManifest, ManifestError> {
 }
 
 /// Save the installation manifest to the default path.
-pub fn save(manifest: &InstalledManifest) -> Result<(), ManifestError> {
+pub fn save(manifest: &InstalledManifest) -> crate::error::Result<()> {
     save_to(manifest, &manifest_path())
 }
 
 /// Save the installation manifest to a specific path.
-pub fn save_to(manifest: &InstalledManifest, path: &Path) -> Result<(), ManifestError> {
+pub fn save_to(manifest: &InstalledManifest, path: &Path) -> crate::error::Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| ManifestError::CreateDir {
+        std::fs::create_dir_all(parent).map_err(|e| Error::CreateDir {
             path: parent.to_path_buf(),
             source: e,
         })?;
     }
-    let content = toml::to_string_pretty(manifest)?;
-    std::fs::write(path, content).map_err(|e| ManifestError::Write {
+    let content = toml::to_string_pretty(manifest).map_err(Error::ManifestSerialize)?;
+    std::fs::write(path, content).map_err(|e| Error::ManifestWrite {
         path: path.to_path_buf(),
         source: e,
     })?;

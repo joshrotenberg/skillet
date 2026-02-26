@@ -229,6 +229,19 @@ pub struct Classification {
     pub tags: Vec<String>,
 }
 
+/// Known abstract capability names for `required_capabilities`.
+///
+/// Values outside this list trigger a validation warning (not error) to
+/// allow forward-compatible extension while catching typos.
+pub const KNOWN_CAPABILITIES: &[&str] = &[
+    "shell_exec",
+    "file_read",
+    "file_write",
+    "file_edit",
+    "web_fetch",
+    "web_search",
+];
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Compatibility {
     #[serde(default)]
@@ -238,7 +251,7 @@ pub struct Compatibility {
     #[serde(default)]
     pub min_context_tokens: Option<u64>,
     #[serde(default)]
-    pub required_tools: Vec<String>,
+    pub required_capabilities: Vec<String>,
     #[serde(default)]
     pub required_mcp_servers: Vec<String>,
     #[serde(default)]
