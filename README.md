@@ -77,6 +77,19 @@ can search, read, and install skills at runtime:
 }
 ```
 
+Or with Docker (zero install):
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "docker",
+      "args": ["run", "-i", "--rm", "ghcr.io/joshrotenberg/skillet"]
+    }
+  }
+}
+```
+
 That's it. Skillet auto-discovers the
 [official registry](https://github.com/joshrotenberg/skillet-registry)
 and any skills already installed on your machine. Your agent now has
