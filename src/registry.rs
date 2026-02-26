@@ -68,12 +68,57 @@ pub fn default_cache_dir() -> PathBuf {
 /// Initialize a new skill registry at the given path.
 ///
 /// Creates a git repo with `config.toml`, `README.md`, and `.gitignore`,
-/// then makes an initial commit.
-pub fn init_registry(path: &Path, name: &str) -> anyhow::Result<()> {
+/// then makes an initial commit. If `description` is provided, it is
+/// included in `config.toml`. Maintainer info is auto-populated from
+/// the user's git config when available.
+pub fn init_registry(path: &Path, name: &str, description: Option<&str>) -> anyhow::Result<()> {
     std::fs::create_dir_all(path)?;
 
     // config.toml
-    let config = format!("[registry]\nname = \"{name}\"\nversion = 1\n", name = name);
+    let mut config = format!("[registry]\nname = \"{name}\"\nversion = 1\n");
+
+    if let Some(desc) = description {
+        config.push_str(&format!("description = \"{desc}\"\n"));
+    }
+
+    // Auto-populate maintainer from git config
+    let git_name = std::process::Command::new("git")
+        .args(["config", "--global", "user.name"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let git_email = std::process::Command::new("git")
+        .args(["config", "--global", "user.email"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let github_user = std::process::Command::new("git")
+        .args(["config", "--global", "github.user"])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    if git_name.is_some() || git_email.is_some() || github_user.is_some() {
+        config.push_str("\n[registry.maintainer]\n");
+        if let Some(ref n) = git_name {
+            config.push_str(&format!("name = \"{n}\"\n"));
+        }
+        if let Some(ref gh) = github_user {
+            config.push_str(&format!("github = \"{gh}\"\n"));
+        }
+        if let Some(ref e) = git_email {
+            config.push_str(&format!("email = \"{e}\"\n"));
+        }
+    }
+
     std::fs::write(path.join("config.toml"), config)?;
 
     // README.md
@@ -345,7 +390,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let registry_path = dir.path().join("my-registry");
 
-        init_registry(&registry_path, "my-registry").unwrap();
+        init_registry(&registry_path, "my-registry", None).unwrap();
 
         // config.toml exists with correct name
         let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();

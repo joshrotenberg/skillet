@@ -116,6 +116,10 @@ struct InitRegistryArgs {
     /// Registry name (defaults to directory name)
     #[arg(long)]
     name: Option<String>,
+
+    /// Registry description
+    #[arg(long)]
+    description: Option<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -416,7 +420,7 @@ fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
         })
         .unwrap_or_else(|| "my-skills".to_string());
 
-    if let Err(e) = registry::init_registry(path, &name) {
+    if let Err(e) = registry::init_registry(path, &name, args.description.as_deref()) {
         eprintln!("Error: {e}");
         return ExitCode::from(1);
     }
@@ -1091,8 +1095,21 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         config,
     );
 
-    // Spawn background refresh tasks for each remote
-    let interval = parse_duration(&args.refresh_interval)?;
+    // Determine refresh interval: CLI flag wins, then registry defaults, then "5m"
+    let effective_interval = if args.refresh_interval == "5m" {
+        // CLI is at default -- check registry config for an override
+        state
+            .config
+            .registry
+            .defaults
+            .as_ref()
+            .and_then(|d| d.refresh_interval.as_deref())
+            .unwrap_or("5m")
+            .to_string()
+    } else {
+        args.refresh_interval.clone()
+    };
+    let interval = parse_duration(&effective_interval)?;
     if interval > Duration::ZERO {
         for url in remote_urls {
             spawn_refresh_task(Arc::clone(&state), url, interval);

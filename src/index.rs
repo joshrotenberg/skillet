@@ -565,6 +565,25 @@ published = "2026-01-01T00:00:00Z"
         let config = load_config(&test_dir).expect("Failed to load config");
         assert_eq!(config.registry.name, "skillet");
         assert_eq!(config.registry.version, 1);
+
+        // New extended fields
+        assert_eq!(
+            config.registry.description.as_deref(),
+            Some("Test registry for skillet development")
+        );
+
+        let maintainer = config.registry.maintainer.as_ref().unwrap();
+        assert_eq!(maintainer.name.as_deref(), Some("Josh Rotenberg"));
+        assert_eq!(maintainer.github.as_deref(), Some("joshrotenberg"));
+        assert!(maintainer.email.is_none());
+
+        let suggests = config.registry.suggests.as_ref().unwrap();
+        assert_eq!(suggests.len(), 1);
+        assert!(suggests[0].url.contains("skillet-registry"));
+        assert!(suggests[0].description.is_some());
+
+        let defaults = config.registry.defaults.as_ref().unwrap();
+        assert_eq!(defaults.refresh_interval.as_deref(), Some("10m"));
     }
 
     #[test]
@@ -575,6 +594,10 @@ published = "2026-01-01T00:00:00Z"
         assert_eq!(config.registry.version, 1);
         assert!(config.registry.urls.is_none());
         assert!(config.registry.auth.is_none());
+        assert!(config.registry.description.is_none());
+        assert!(config.registry.maintainer.is_none());
+        assert!(config.registry.suggests.is_none());
+        assert!(config.registry.defaults.is_none());
     }
 
     #[test]
@@ -613,6 +636,134 @@ required = true
 
         let result = load_config(tmp.path());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_load_config_with_all_extended_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            r#"
+[registry]
+name = "acme-team-skills"
+version = 1
+description = "Internal Python and DevOps skills"
+
+[registry.maintainer]
+name = "Jane Doe"
+github = "janedoe"
+email = "jane@example.com"
+
+[registry.urls]
+download = "https://skills.example.com/packages"
+api = "https://skills.example.com/api/v1"
+
+[registry.auth]
+required = true
+
+[[registry.suggests]]
+url = "https://github.com/joshrotenberg/skillet-registry.git"
+description = "Official community skills"
+
+[[registry.suggests]]
+url = "https://github.com/acme/devops-skills.git"
+
+[registry.defaults]
+refresh_interval = "10m"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(tmp.path()).expect("Failed to parse config with all fields");
+        assert_eq!(config.registry.name, "acme-team-skills");
+        assert_eq!(
+            config.registry.description.as_deref(),
+            Some("Internal Python and DevOps skills")
+        );
+
+        let m = config.registry.maintainer.as_ref().unwrap();
+        assert_eq!(m.name.as_deref(), Some("Jane Doe"));
+        assert_eq!(m.github.as_deref(), Some("janedoe"));
+        assert_eq!(m.email.as_deref(), Some("jane@example.com"));
+
+        assert!(config.registry.urls.is_some());
+        assert!(config.registry.auth.unwrap().required);
+
+        let suggests = config.registry.suggests.as_ref().unwrap();
+        assert_eq!(suggests.len(), 2);
+        assert!(suggests[0].url.contains("skillet-registry"));
+        assert_eq!(
+            suggests[0].description.as_deref(),
+            Some("Official community skills")
+        );
+        assert!(suggests[1].url.contains("devops-skills"));
+        assert!(suggests[1].description.is_none());
+
+        let defaults = config.registry.defaults.as_ref().unwrap();
+        assert_eq!(defaults.refresh_interval.as_deref(), Some("10m"));
+    }
+
+    #[test]
+    fn test_load_config_with_partial_extended_fields() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            r#"
+[registry]
+name = "minimal-plus"
+version = 1
+description = "Just a description, nothing else new"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(tmp.path()).expect("Failed to parse partial config");
+        assert_eq!(config.registry.name, "minimal-plus");
+        assert_eq!(
+            config.registry.description.as_deref(),
+            Some("Just a description, nothing else new")
+        );
+        assert!(config.registry.maintainer.is_none());
+        assert!(config.registry.suggests.is_none());
+        assert!(config.registry.defaults.is_none());
+    }
+
+    #[test]
+    fn test_load_config_backward_compat_minimal() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("config.toml"),
+            "[registry]\nname = \"old-style\"\nversion = 1\n",
+        )
+        .unwrap();
+
+        let config = load_config(tmp.path()).expect("Failed to parse minimal config");
+        assert_eq!(config.registry.name, "old-style");
+        assert_eq!(config.registry.version, 1);
+        assert!(config.registry.description.is_none());
+        assert!(config.registry.maintainer.is_none());
+        assert!(config.registry.suggests.is_none());
+        assert!(config.registry.defaults.is_none());
+    }
+
+    #[test]
+    fn test_init_registry_with_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry_path = dir.path().join("described-registry");
+
+        crate::registry::init_registry(
+            &registry_path,
+            "described-registry",
+            Some("A test registry with a description"),
+        )
+        .unwrap();
+
+        let config = load_config(&registry_path).expect("Failed to load init'd config");
+        assert_eq!(config.registry.name, "described-registry");
+        assert_eq!(
+            config.registry.description.as_deref(),
+            Some("A test registry with a description")
+        );
     }
 
     #[test]

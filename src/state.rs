@@ -53,8 +53,12 @@ impl Default for RegistryConfig {
             registry: RegistryInfo {
                 name: default_registry_name(),
                 version: default_registry_version(),
+                description: None,
+                maintainer: None,
                 urls: None,
                 auth: None,
+                suggests: None,
+                defaults: None,
             },
         }
     }
@@ -69,9 +73,38 @@ pub struct RegistryInfo {
     #[serde(default = "default_registry_version")]
     pub version: u32,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub maintainer: Option<RegistryMaintainer>,
+    #[serde(default)]
     pub urls: Option<RegistryUrls>,
     #[serde(default)]
     pub auth: Option<RegistryAuth>,
+    #[serde(default)]
+    pub suggests: Option<Vec<RegistrySuggestion>>,
+    #[serde(default)]
+    pub defaults: Option<RegistryDefaults>,
+}
+
+/// Registry maintainer information.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryMaintainer {
+    pub name: Option<String>,
+    pub github: Option<String>,
+    pub email: Option<String>,
+}
+
+/// A suggested registry for discovery (lightweight federation).
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistrySuggestion {
+    pub url: String,
+    pub description: Option<String>,
+}
+
+/// Server defaults that a registry can specify.
+#[derive(Debug, Clone, Deserialize)]
+pub struct RegistryDefaults {
+    pub refresh_interval: Option<String>,
 }
 
 /// Optional URL endpoints for non-git-backed registries.
