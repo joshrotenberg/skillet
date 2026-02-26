@@ -1649,6 +1649,10 @@ const ALL_TOOL_NAMES: &[&str] = &[
     "info",
     "compare",
     "status",
+    "list_installed",
+    "audit",
+    "setup",
+    "validate",
 ];
 
 /// All known resource short names.
@@ -1670,7 +1674,7 @@ impl ServerCapabilities {
         } else if args.read_only || args.no_install {
             ALL_TOOL_NAMES
                 .iter()
-                .filter(|&&t| t != "install")
+                .filter(|&&t| t != "install" && t != "setup")
                 .map(|&s| s.to_string())
                 .collect()
         } else if !cli_config.server.tools.is_empty() {
@@ -1717,6 +1721,18 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
     }
     if caps.tools.contains("status") {
         router = router.tool(tools::skill_status::build(state.clone()));
+    }
+    if caps.tools.contains("list_installed") {
+        router = router.tool(tools::list_installed::build(state.clone()));
+    }
+    if caps.tools.contains("audit") {
+        router = router.tool(tools::audit_skills::build(state.clone()));
+    }
+    if caps.tools.contains("setup") {
+        router = router.tool(tools::setup_config::build(state.clone()));
+    }
+    if caps.tools.contains("validate") {
+        router = router.tool(tools::validate_skill::build(state.clone()));
     }
 
     // Register resources conditionally
@@ -1773,6 +1789,24 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
         tool_lines.push(
             "- skill_status: Show installed skill status (version, integrity, trust, updates available)",
         );
+    }
+    if caps.tools.contains("list_installed") {
+        tool_lines
+            .push("- list_installed: List all skills currently installed on the local filesystem");
+    }
+    if caps.tools.contains("audit") {
+        tool_lines.push(
+            "- audit_skills: Audit installed skills against pinned content hashes for integrity",
+        );
+    }
+    if caps.tools.contains("setup") {
+        tool_lines.push(
+            "- setup_config: Generate initial skillet configuration at ~/.config/skillet/config.toml",
+        );
+    }
+    if caps.tools.contains("validate") {
+        tool_lines
+            .push("- validate_skill: Validate a skillpack directory for correctness and safety");
     }
     if !tool_lines.is_empty() {
         text.push_str("Tools:\n");

@@ -311,6 +311,10 @@ fetch content via resource templates.
 | `compare_skills` | Side-by-side comparison of two or more skills |
 | `skill_status` | Check install status and trust tier for a skill |
 | `install_skill` | Install a skill to the local filesystem |
+| `list_installed` | List all skills installed on the local filesystem |
+| `audit_skills` | Verify installed skills against pinned content hashes |
+| `setup_config` | Generate initial configuration at `~/.config/skillet/config.toml` |
+| `validate_skill` | Validate a skillpack directory for correctness and safety |
 
 ### Resources
 

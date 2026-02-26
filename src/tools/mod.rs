@@ -1,7 +1,11 @@
+pub mod audit_skills;
 pub mod compare_skills;
 pub mod info_skill;
 pub mod install_skill;
 pub mod list_categories;
+pub mod list_installed;
 pub mod list_skills_by_owner;
 pub mod search_skills;
+pub mod setup_config;
 pub mod skill_status;
+pub mod validate_skill;
