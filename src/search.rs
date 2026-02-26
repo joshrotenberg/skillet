@@ -3,6 +3,8 @@
 //! Builds a BM25 index from the skill registry and provides relevance-ranked
 //! search over skill metadata fields.
 
+use std::collections::HashMap;
+
 use crate::bm25::{Bm25Index, IndexOptions};
 use crate::state::SkillIndex;
 
@@ -11,6 +13,11 @@ const STOP_WORDS: &[&str] = &[
     "a", "an", "and", "are", "as", "at", "be", "but", "by", "for", "if", "in", "into", "is", "it",
     "no", "not", "of", "on", "or", "such", "that", "the", "their", "then", "there", "these",
     "they", "this", "to", "was", "will", "with",
+    // Question words and pronouns -- improve natural language query handling
+    "how", "do", "does", "did", "can", "should", "would", "could", "what", "which", "where", "when",
+    "why", "who", "me", "my", "i", "you", "your", "we", "us", // Common filler words
+    "about", "from", "have", "has", "had", "been", "being", "some", "any", "all", "just", "want",
+    "need",
 ];
 
 /// Search index over skills, backed by BM25.
@@ -49,6 +56,15 @@ impl SkillSearch {
             })
             .collect();
 
+        let field_weights = HashMap::from([
+            ("name".to_string(), 3.0),
+            ("owner".to_string(), 2.0),
+            ("description".to_string(), 1.5),
+            ("trigger".to_string(), 1.5),
+            ("categories".to_string(), 1.0),
+            ("tags".to_string(), 1.0),
+        ]);
+
         let options = IndexOptions {
             fields: vec![
                 "owner".to_string(),
@@ -63,6 +79,7 @@ impl SkillSearch {
             lowercase: true,
             k1: 1.2,
             b: 0.75,
+            field_weights,
         };
 
         Self {
@@ -224,5 +241,24 @@ mod tests {
         let search = SkillSearch::build(&idx);
         let results = search.search("kubernetes helm", 10);
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn test_search_natural_language_query() {
+        let idx = test_index();
+        let search = SkillSearch::build(&idx);
+
+        // "how do I write good tests" -- stop words stripped, "testing" stems to "test"
+        let results = search.search("how do I write good tests", 10);
+        assert!(
+            !results.is_empty(),
+            "natural language query should find results"
+        );
+        // python-dev has "testing" in description, which stems to "test" matching "tests"
+        let names: Vec<&str> = results.iter().map(|r| r.1.as_str()).collect();
+        assert!(
+            names.contains(&"python-dev"),
+            "should find python-dev (has 'testing' in desc): {names:?}"
+        );
     }
 }

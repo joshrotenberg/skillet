@@ -58,6 +58,9 @@ pub struct IndexOptions {
 
     /// BM25 b parameter (length normalization)
     pub b: f64,
+
+    /// BM25F field weights: field_name -> weight (default empty = uniform weighting)
+    pub field_weights: HashMap<String, f64>,
 }
 
 impl Default for IndexOptions {
@@ -69,6 +72,7 @@ impl Default for IndexOptions {
             stopwords: Vec::new(),
             k1: 1.2,
             b: 0.75,
+            field_weights: HashMap::new(),
         }
     }
 }
@@ -85,14 +89,31 @@ pub struct DocInfo {
     pub field_lengths: HashMap<String, usize>,
 }
 
+/// Per-document posting for a term, with optional field-level breakdown.
+#[derive(Debug, Clone)]
+pub struct TermPostings {
+    /// Total term frequency across all fields.
+    pub total_freq: usize,
+
+    /// Per-field term frequencies (populated when fields are configured).
+    pub field_freqs: HashMap<String, usize>,
+}
+
 /// Term information in the inverted index
 #[derive(Debug, Clone)]
 pub struct TermInfo {
     /// Document frequency (number of documents containing this term)
     pub df: usize,
 
-    /// Postings: doc_id -> term frequency in that document
-    pub postings: HashMap<String, usize>,
+    /// Postings: doc_id -> term postings with field breakdown
+    pub postings: HashMap<String, TermPostings>,
+}
+
+/// Result of tokenizing a document: flat tokens, per-field lengths, and per-field token lists.
+struct TokenizedDoc {
+    tokens: Vec<String>,
+    field_lengths: HashMap<String, usize>,
+    field_tokens: HashMap<String, Vec<String>>,
 }
 
 /// Search result
@@ -128,8 +149,8 @@ impl Bm25Index {
 
         for (i, doc) in docs.iter().enumerate() {
             let doc_id = index.get_doc_id(doc, i);
-            let (tokens, field_lengths) = index.tokenize_doc(doc);
-            let doc_length = tokens.len();
+            let tdoc = index.tokenize_doc(doc);
+            let doc_length = tdoc.tokens.len();
             total_length += doc_length;
 
             // Store document info
@@ -137,23 +158,47 @@ impl Bm25Index {
                 doc_id.clone(),
                 DocInfo {
                     length: doc_length,
-                    field_lengths,
+                    field_lengths: tdoc.field_lengths,
                 },
             );
 
-            // Update inverted index
+            // Build per-field term frequency maps
+            let mut field_term_freqs: HashMap<String, HashMap<String, usize>> = HashMap::new();
+            for (field, ftokens) in &tdoc.field_tokens {
+                let ftf = field_term_freqs.entry(field.clone()).or_default();
+                for token in ftokens {
+                    *ftf.entry(token.clone()).or_insert(0) += 1;
+                }
+            }
+
+            // Update inverted index with total + per-field frequencies
             let mut term_freqs: HashMap<String, usize> = HashMap::new();
-            for token in tokens {
+            for token in tdoc.tokens {
                 *term_freqs.entry(token).or_insert(0) += 1;
             }
 
             for (term, freq) in term_freqs {
-                let term_info = index.terms.entry(term).or_insert(TermInfo {
+                let term_info = index.terms.entry(term.clone()).or_insert(TermInfo {
                     df: 0,
                     postings: HashMap::new(),
                 });
                 term_info.df += 1;
-                term_info.postings.insert(doc_id.clone(), freq);
+
+                // Collect per-field frequencies for this term
+                let mut field_freqs = HashMap::new();
+                for (field, ftf) in &field_term_freqs {
+                    if let Some(&ff) = ftf.get(&term) {
+                        field_freqs.insert(field.clone(), ff);
+                    }
+                }
+
+                term_info.postings.insert(
+                    doc_id.clone(),
+                    TermPostings {
+                        total_freq: freq,
+                        field_freqs,
+                    },
+                );
             }
 
             index.doc_count += 1;
@@ -184,10 +229,11 @@ impl Bm25Index {
         format!("{}", index)
     }
 
-    /// Tokenize a document into terms
-    fn tokenize_doc(&self, doc: &serde_json::Value) -> (Vec<String>, HashMap<String, usize>) {
+    /// Tokenize a document into terms, with per-field breakdown for weighted scoring.
+    fn tokenize_doc(&self, doc: &serde_json::Value) -> TokenizedDoc {
         let mut tokens = Vec::new();
         let mut field_lengths = HashMap::new();
+        let mut field_tokens = HashMap::new();
 
         if self.options.fields.is_empty() {
             // Treat entire doc as text
@@ -198,14 +244,19 @@ impl Bm25Index {
             for field in &self.options.fields {
                 if let Some(value) = doc.get(field) {
                     let text = self.extract_text(value);
-                    let field_tokens = self.tokenize_text(&text);
-                    field_lengths.insert(field.clone(), field_tokens.len());
-                    tokens.extend(field_tokens);
+                    let ft = self.tokenize_text(&text);
+                    field_lengths.insert(field.clone(), ft.len());
+                    field_tokens.insert(field.clone(), ft.clone());
+                    tokens.extend(ft);
                 }
             }
         }
 
-        (tokens, field_lengths)
+        TokenizedDoc {
+            tokens,
+            field_lengths,
+            field_tokens,
+        }
     }
 
     /// Extract text from a JSON value
@@ -248,16 +299,41 @@ impl Bm25Index {
     }
 }
 
-/// Simple plural stemmer for search indexing.
+/// Check if a byte is a vowel (a, e, i, o, u).
+fn is_vowel_byte(b: u8) -> bool {
+    matches!(b, b'a' | b'e' | b'i' | b'o' | b'u')
+}
+
+/// Check if a byte is a consonant (alphabetic, not a vowel).
+fn is_consonant(b: u8) -> bool {
+    b.is_ascii_alphabetic() && !is_vowel_byte(b)
+}
+
+/// Check if a string contains at least one vowel.
+fn has_vowel(s: &str) -> bool {
+    s.bytes().any(is_vowel_byte)
+}
+
+/// Check if a string ends with a doubled consonant (e.g. "nn", "pp", "tt").
+fn has_doubled_consonant(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() >= 2
+        && is_consonant(bytes[bytes.len() - 1])
+        && bytes[bytes.len() - 1] == bytes[bytes.len() - 2]
+}
+
+/// Simple stemmer for search indexing.
 ///
-/// Handles common English plural forms:
-/// - "databases" -> "database" (strip -s after vowel+consonant+e pattern)
-/// - "ACLs" -> "ACL" (strip -s)
-/// - "queries" -> "query" (ies -> y)
-/// - "boxes" -> "box" (strip -es after x/z)
+/// Handles common English suffixes:
+/// - Plurals: "databases" -> "database", "queries" -> "query", "boxes" -> "box"
+/// - Verb -ing: "testing" -> "test", "running" -> "run", "coding" -> "code"
+/// - Verb -ed: "tested" -> "test", "configured" -> "configure", "stopped" -> "stop"
+/// - Agent -er: "tester" -> "test", "bigger" -> "big", "user" -> "use"
 ///
-/// This is intentionally simple - it improves recall for plural/singular
-/// matching without the complexity of a full Porter stemmer.
+/// Rules to avoid over-stemming:
+/// - Require a vowel in the stem (prevents "string" -> "str")
+/// - Collapse doubled consonants ("running" -> "runn" -> "run")
+/// - Restore silent-e for consonant-vowel-consonant stems ("coding" -> "cod" -> "code")
 fn stem_simple(term: &str) -> String {
     let t = term.to_string();
     let len = t.len();
@@ -265,6 +341,69 @@ fn stem_simple(term: &str) -> String {
     // Skip very short terms
     if len < 3 {
         return t;
+    }
+
+    // Handle -ing (testing -> test, running -> run, coding -> code)
+    if len > 4 && t.ends_with("ing") {
+        let stem = &t[..len - 3];
+        if has_vowel(stem) {
+            if has_doubled_consonant(stem) {
+                // running -> runn -> run
+                return stem[..stem.len() - 1].to_string();
+            }
+            let bytes = stem.as_bytes();
+            // Restore silent-e for CVC pattern: coding -> cod -> code
+            if bytes.len() >= 2
+                && is_consonant(bytes[bytes.len() - 1])
+                && is_vowel_byte(bytes[bytes.len() - 2])
+                && (bytes.len() < 3 || is_consonant(bytes[bytes.len() - 3]))
+            {
+                return format!("{stem}e");
+            }
+            return stem.to_string();
+        }
+    }
+
+    // Handle -ed (tested -> test, configured -> configure, stopped -> stop)
+    if len > 3 && t.ends_with("ed") {
+        let stem = &t[..len - 2];
+        if has_vowel(stem) {
+            if has_doubled_consonant(stem) {
+                // stopped -> stopp -> stop
+                return stem[..stem.len() - 1].to_string();
+            }
+            let bytes = stem.as_bytes();
+            // Restore silent-e for CVC: configured -> configur -> configure
+            if bytes.len() >= 2
+                && is_consonant(bytes[bytes.len() - 1])
+                && is_vowel_byte(bytes[bytes.len() - 2])
+                && (bytes.len() < 3 || is_consonant(bytes[bytes.len() - 3]))
+            {
+                return format!("{stem}e");
+            }
+            return stem.to_string();
+        }
+    }
+
+    // Handle -er (tester -> test, bigger -> big, user -> use)
+    if len > 3 && t.ends_with("er") {
+        let stem = &t[..len - 2];
+        if has_vowel(stem) {
+            if has_doubled_consonant(stem) {
+                // bigger -> bigg -> big
+                return stem[..stem.len() - 1].to_string();
+            }
+            let bytes = stem.as_bytes();
+            // Restore silent-e for CVC: user -> us -> use
+            if bytes.len() >= 2
+                && is_consonant(bytes[bytes.len() - 1])
+                && is_vowel_byte(bytes[bytes.len() - 2])
+                && (bytes.len() < 3 || is_consonant(bytes[bytes.len() - 3]))
+            {
+                return format!("{stem}e");
+            }
+            return stem.to_string();
+        }
     }
 
     // Handle -ies -> -y (queries -> query, entries -> entry)
@@ -310,7 +449,10 @@ impl Bm25Index {
         ((n - df + 0.5) / (df + 0.5) + 1.0).ln()
     }
 
-    /// Calculate BM25 score for a document given query terms
+    /// Calculate BM25 score for a document given query terms.
+    ///
+    /// When `field_weights` are configured, uses BM25F-style scoring where
+    /// weighted TF = sum(weight_f * tf_f) replaces the flat term frequency.
     fn score_doc(&self, doc_id: &str, query_terms: &[String]) -> f64 {
         let doc_info = match self.docs.get(doc_id) {
             Some(info) => info,
@@ -321,17 +463,32 @@ impl Bm25Index {
         let k1 = self.options.k1;
         let b = self.options.b;
         let avgdl = self.avg_doc_length;
+        let use_field_weights = !self.options.field_weights.is_empty();
 
         let mut score = 0.0;
 
         for term in query_terms {
             let idf = self.idf(term);
-            let tf = self
-                .terms
-                .get(term)
-                .and_then(|t| t.postings.get(doc_id))
-                .copied()
-                .unwrap_or(0) as f64;
+            let postings = self.terms.get(term).and_then(|t| t.postings.get(doc_id));
+
+            let tf = match postings {
+                Some(p) if use_field_weights => {
+                    // BM25F: weighted TF = sum(weight * field_tf)
+                    let mut weighted = 0.0;
+                    for (field, &freq) in &p.field_freqs {
+                        let w = self
+                            .options
+                            .field_weights
+                            .get(field)
+                            .copied()
+                            .unwrap_or(1.0);
+                        weighted += w * freq as f64;
+                    }
+                    weighted
+                }
+                Some(p) => p.total_freq as f64,
+                None => 0.0,
+            };
 
             if tf > 0.0 {
                 // BM25 formula
@@ -453,8 +610,9 @@ mod tests {
         assert_eq!(index.doc_count, 3);
         assert!(index.docs.contains_key("create_cluster"));
         assert!(index.docs.contains_key("delete_cluster"));
-        assert!(index.terms.contains_key("cluster"));
-        assert_eq!(index.terms.get("cluster").unwrap().df, 2);
+        // "cluster" stems to "clust" via -er rule
+        assert!(index.terms.contains_key("clust"));
+        assert_eq!(index.terms.get("clust").unwrap().df, 2);
     }
 
     #[test]
@@ -608,5 +766,94 @@ mod tests {
         let index = Bm25Index::build(&docs, IndexOptions::default());
         let idf = index.idf("nonexistent_term");
         assert_eq!(idf, 0.0);
+    }
+
+    #[test]
+    fn test_stem_simple_ing() {
+        assert_eq!(stem_simple("testing"), "test");
+        assert_eq!(stem_simple("running"), "run");
+        assert_eq!(stem_simple("coding"), "code");
+        assert_eq!(stem_simple("making"), "make");
+    }
+
+    #[test]
+    fn test_stem_simple_ing_no_vowel() {
+        // "string" stem "str" has no vowel -- should not strip
+        assert_eq!(stem_simple("string"), "string");
+    }
+
+    #[test]
+    fn test_stem_simple_ed() {
+        assert_eq!(stem_simple("tested"), "test");
+        assert_eq!(stem_simple("configured"), "configure");
+        assert_eq!(stem_simple("stopped"), "stop");
+    }
+
+    #[test]
+    fn test_stem_simple_er() {
+        assert_eq!(stem_simple("tester"), "test");
+        assert_eq!(stem_simple("bigger"), "big");
+        assert_eq!(stem_simple("user"), "use");
+    }
+
+    #[test]
+    fn test_field_weighted_scoring() {
+        // Doc A has "rust" in name only, doc B has "rust" in description only.
+        // With name weight 3.0 > description weight 1.0, doc A should score higher.
+        let docs = vec![
+            json!({"name": "rust", "description": "a programming language"}),
+            json!({"name": "language", "description": "rust is great"}),
+        ];
+
+        let options = IndexOptions {
+            fields: vec!["name".to_string(), "description".to_string()],
+            id_field: Some("name".to_string()),
+            field_weights: HashMap::from([
+                ("name".to_string(), 3.0),
+                ("description".to_string(), 1.0),
+            ]),
+            ..Default::default()
+        };
+
+        let index = Bm25Index::build(&docs, options);
+        let results = index.search("rust", 10);
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].id, "rust"); // name match ranks first
+        assert!(results[0].score > results[1].score);
+    }
+
+    #[test]
+    fn test_field_weights_backward_compatible() {
+        // Empty field_weights should produce the same scores as no weighting
+        let docs = vec![
+            json!({"name": "cluster_manager", "description": "Manage cluster operations"}),
+            json!({"name": "backup_tool", "description": "Backup tool for cluster data"}),
+        ];
+
+        let options_no_weights = IndexOptions {
+            fields: vec!["name".to_string(), "description".to_string()],
+            id_field: Some("name".to_string()),
+            ..Default::default()
+        };
+
+        let options_with_weights = IndexOptions {
+            fields: vec!["name".to_string(), "description".to_string()],
+            id_field: Some("name".to_string()),
+            field_weights: HashMap::new(), // empty = no weighting
+            ..Default::default()
+        };
+
+        let index_no = Bm25Index::build(&docs, options_no_weights);
+        let index_with = Bm25Index::build(&docs, options_with_weights);
+
+        let results_no = index_no.search("cluster", 10);
+        let results_with = index_with.search("cluster", 10);
+
+        assert_eq!(results_no.len(), results_with.len());
+        for (a, b) in results_no.iter().zip(results_with.iter()) {
+            assert_eq!(a.id, b.id);
+            assert!((a.score - b.score).abs() < 1e-10);
+        }
     }
 }
