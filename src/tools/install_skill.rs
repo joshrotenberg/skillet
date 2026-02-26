@@ -11,9 +11,11 @@ use tower_mcp::{
 
 use skillet_mcp::config::{self, ALL_TARGETS, InstallTarget};
 use skillet_mcp::install::{self, InstallOptions};
+use skillet_mcp::integrity;
 use skillet_mcp::manifest;
 use skillet_mcp::safety;
 use skillet_mcp::state::AppState;
+use skillet_mcp::trust;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct InstallSkillInput {
@@ -80,6 +82,18 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     "unknown".to_string()
                 };
 
+                // Trust checking (warn-only in MCP path, never blocks)
+                let content_hash = integrity::sha256_hex(&version.skill_md);
+                let cli_config = config::load_config().unwrap_or_default();
+                let trust_state = trust::load().unwrap_or_default();
+                let trust_check = trust::check_trust(
+                    &trust_state,
+                    &registry_id,
+                    &input.owner,
+                    &input.name,
+                    &content_hash,
+                );
+
                 // Load manifest
                 let mut installed_manifest = match manifest::load() {
                     Ok(m) => m,
@@ -93,7 +107,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let options = InstallOptions {
                     targets,
                     global,
-                    registry: registry_id,
+                    registry: registry_id.clone(),
                 };
 
                 // Install
@@ -119,6 +133,19 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     )));
                 }
 
+                // Auto-pin content hash after successful install
+                if cli_config.trust.auto_pin {
+                    let mut trust_state = trust_state;
+                    trust_state.pin_skill(
+                        &input.owner,
+                        &input.name,
+                        &version.version,
+                        &registry_id,
+                        &content_hash,
+                    );
+                    let _ = trust::save(&trust_state);
+                }
+
                 // Build response
                 let scope = if global { "global" } else { "project" };
                 let mut output = format!(
@@ -140,8 +167,16 @@ pub fn build(state: Arc<AppState>) -> Tool {
                      A restart may be required for the agent to pick it up.",
                 );
 
-                // Safety scan (informational -- never blocks install via MCP)
-                let cli_config = config::load_config().unwrap_or_default();
+                // Trust info
+                output.push_str(&format!(
+                    "\n\n**Trust**: {} ({})",
+                    trust_check.tier, trust_check.reason
+                ));
+                if trust_check.tier == trust::TrustTier::Reviewed
+                    && trust_check.pinned_hash.as_deref() != Some(&content_hash)
+                {
+                    output.push_str("\n**Warning**: content changed since pinned");
+                }
                 let report = safety::scan(
                     &version.skill_md,
                     &version.skill_toml_raw,
