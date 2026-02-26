@@ -2176,6 +2176,7 @@ mod tests {
         assert!(names.contains(&"list_categories"));
         assert!(names.contains(&"list_skills_by_owner"));
         assert!(names.contains(&"install_skill"));
+        assert!(names.contains(&"info_skill"));
     }
 
     #[tokio::test]
@@ -2578,6 +2579,425 @@ mod tests {
         assert!(caps.tools.contains("search"));
         assert_eq!(caps.resources.len(), 1);
         assert!(caps.resources.contains("files"));
+    }
+
+    // ── info_skill tool tests ──────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_info_skill() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "rust-dev"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("joshrotenberg/rust-dev"),
+            "should show owner/name header: {text}"
+        );
+        assert!(text.contains("**Version:**"), "should show version: {text}");
+        assert!(
+            text.contains("**Description:**"),
+            "should show description: {text}"
+        );
+        assert!(
+            text.contains("Rust"),
+            "should mention Rust in description: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_info_skill_metadata_fields() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "rust-dev"}),
+            )
+            .await;
+        let text = result.all_text();
+
+        // rust-dev has author, license, categories, tags, verified_with
+        assert!(text.contains("**Author:**"), "should show author: {text}");
+        assert!(text.contains("**License:**"), "should show license: {text}");
+        assert!(
+            text.contains("**Categories:**"),
+            "should show categories: {text}"
+        );
+        assert!(text.contains("**Tags:**"), "should show tags: {text}");
+        assert!(
+            text.contains("**Verified with:**"),
+            "should show verified_with: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_info_skill_not_found() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "nonexistent", "name": "no-such-skill"}),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("not found"),
+            "should report skill not found: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_info_skill_with_files() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // python-dev has extra files (scripts/, references/)
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "acme", "name": "python-dev"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("**Files:**"),
+            "should list extra files: {text}"
+        );
+    }
+
+    // ── install_skill tool tests ─────────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_install_skill_not_found() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "install_skill",
+                serde_json::json!({"owner": "nonexistent", "name": "no-such-skill"}),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("not found"),
+            "should report skill not found: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_install_skill_local_early_return() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
+        use std::collections::HashMap;
+
+        // Build a router with a synthetic local skill injected
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let mut skill_index = index::load_index(&registry_path).expect("load index");
+
+        // Insert a synthetic local skill
+        skill_index.skills.insert(
+            ("local".to_string(), "my-local-skill".to_string()),
+            SkillEntry {
+                owner: "local".to_string(),
+                name: "my-local-skill".to_string(),
+                versions: vec![SkillVersion {
+                    version: "0.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: SkillInfo {
+                            name: "my-local-skill".to_string(),
+                            owner: "local".to_string(),
+                            version: "0.0.0".to_string(),
+                            description: "A local skill".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "# My Local Skill".to_string(),
+                    skill_toml_raw: String::new(),
+                    yanked: false,
+                    files: HashMap::new(),
+                    published: None,
+                    has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
+                }],
+                source: SkillSource::Local {
+                    platform: "claude".to_string(),
+                    path: PathBuf::from("/tmp/fake-skill-dir"),
+                },
+            },
+        );
+
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "install_skill",
+                serde_json::json!({"owner": "local", "name": "my-local-skill"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("already installed locally"),
+            "should report already installed: {text}"
+        );
+        assert!(
+            text.contains("claude"),
+            "should mention the platform: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_install_skill_invalid_target() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "install_skill",
+                serde_json::json!({
+                    "owner": "joshrotenberg",
+                    "name": "rust-dev",
+                    "target": "invalid_platform"
+                }),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("invalid_platform") || text.contains("Unknown"),
+            "should report invalid target: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_info_skill_all_yanked() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillVersion};
+        use std::collections::HashMap;
+
+        // Build a router with a skill that has all versions yanked
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let mut skill_index = index::load_index(&registry_path).expect("load index");
+
+        skill_index.skills.insert(
+            ("testowner".to_string(), "yanked-skill".to_string()),
+            SkillEntry {
+                owner: "testowner".to_string(),
+                name: "yanked-skill".to_string(),
+                versions: vec![SkillVersion {
+                    version: "1.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: SkillInfo {
+                            name: "yanked-skill".to_string(),
+                            owner: "testowner".to_string(),
+                            version: "1.0.0".to_string(),
+                            description: "A yanked skill".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "# Yanked".to_string(),
+                    skill_toml_raw: String::new(),
+                    yanked: true,
+                    files: HashMap::new(),
+                    published: None,
+                    has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
+                }],
+                source: Default::default(),
+            },
+        );
+
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "testowner", "name": "yanked-skill"}),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("yanked") || text.contains("No available versions"),
+            "should report all versions yanked: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_install_skill_all_yanked() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillVersion};
+        use std::collections::HashMap;
+
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let mut skill_index = index::load_index(&registry_path).expect("load index");
+
+        skill_index.skills.insert(
+            ("testowner".to_string(), "yanked-skill".to_string()),
+            SkillEntry {
+                owner: "testowner".to_string(),
+                name: "yanked-skill".to_string(),
+                versions: vec![SkillVersion {
+                    version: "1.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: SkillInfo {
+                            name: "yanked-skill".to_string(),
+                            owner: "testowner".to_string(),
+                            version: "1.0.0".to_string(),
+                            description: "A yanked skill".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "# Yanked".to_string(),
+                    skill_toml_raw: String::new(),
+                    yanked: true,
+                    files: HashMap::new(),
+                    published: None,
+                    has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
+                }],
+                source: Default::default(),
+            },
+        );
+
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "install_skill",
+                serde_json::json!({"owner": "testowner", "name": "yanked-skill"}),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("yanked") || text.contains("No available versions"),
+            "should report all versions yanked: {text}"
+        );
+    }
+
+    // ── Capability gating tests for info_skill ───────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_info_skill_excluded_when_not_in_caps() {
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let skill_index = index::load_index(&registry_path).expect("load index");
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        // Only include search, not info
+        let caps = ServerCapabilities {
+            tools: ["search"].iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let tools = client.list_tools().await;
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(
+            !names.contains(&"info_skill"),
+            "info_skill should be excluded"
+        );
+        assert!(
+            names.contains(&"search_skills"),
+            "search_skills should be present"
+        );
     }
 
     /// Build a router with limited capabilities and verify only those tools are listed.
