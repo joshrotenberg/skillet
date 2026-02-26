@@ -17,7 +17,9 @@ any compatible agent.
 
 Think of it like git: skillet is the tool, registries are distributed.
 Anyone can create a registry (a git repo with a flat directory structure),
-publish skills to it, and share it.
+publish skills to it, and share it. The same binary is always both client
+and server -- the CLI commands and the MCP server use the same index and
+search engine under the hood.
 
 ## Quick start
 
@@ -89,6 +91,24 @@ Add skillet to your agent's MCP config to give it runtime access to skills:
     "skillet": {
       "command": "skillet",
       "args": ["--remote", "https://github.com/joshrotenberg/skillet-registry.git"]
+    }
+  }
+}
+```
+
+For teams, a shared MCP server pointed at an internal registry means
+everyone's agent gets the same skills at the same versions -- no drift,
+no "works on my machine" mismatches:
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet",
+      "args": [
+        "--remote", "https://github.com/acme/team-skills.git",
+        "--http", "0.0.0.0:8080"
+      ]
     }
   }
 }
