@@ -3000,6 +3000,351 @@ mod tests {
         );
     }
 
+    // ── MCP multi-step scenario tests ───────────────────────────────────
+
+    /// Discovery-to-read workflow: search -> info -> read resource -> verify consistency
+    #[tokio::test]
+    async fn test_scenario_discovery_to_read() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Step 1: Search for rust skills
+        let search_result = client
+            .call_tool("search_skills", serde_json::json!({"query": "rust"}))
+            .await;
+        assert!(!search_result.is_error);
+        let search_text = search_result.all_text();
+        assert!(
+            search_text.contains("joshrotenberg/rust-dev"),
+            "search should find rust-dev: {search_text}"
+        );
+
+        // Step 2: Get info on the found skill
+        let info_result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "rust-dev"}),
+            )
+            .await;
+        assert!(!info_result.is_error);
+        let info_text = info_result.all_text();
+        assert!(info_text.contains("**Version:**"));
+        assert!(info_text.contains("**Description:**"));
+
+        // Step 3: Read the SKILL.md content via resource
+        let resource_result = client
+            .read_resource("skillet://skills/joshrotenberg/rust-dev")
+            .await;
+        let skill_md = resource_result
+            .first_text()
+            .expect("should have SKILL.md content");
+        assert!(
+            skill_md.contains("Rust"),
+            "SKILL.md should mention Rust: {skill_md}"
+        );
+
+        // Step 4: Read metadata via resource and verify consistency
+        let metadata_result = client
+            .read_resource("skillet://metadata/joshrotenberg/rust-dev")
+            .await;
+        let metadata = metadata_result
+            .first_text()
+            .expect("should have metadata content");
+        assert!(
+            metadata.contains("rust-dev"),
+            "metadata should reference rust-dev: {metadata}"
+        );
+        assert!(
+            metadata.contains("joshrotenberg"),
+            "metadata should reference owner: {metadata}"
+        );
+    }
+
+    /// Filtered browsing: list_categories -> search with category -> info -> verify match
+    #[tokio::test]
+    async fn test_scenario_filtered_browsing() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Step 1: List categories
+        let cats_result = client
+            .call_tool("list_categories", serde_json::json!({}))
+            .await;
+        assert!(!cats_result.is_error);
+        let cats_text = cats_result.all_text();
+        assert!(
+            cats_text.contains("security"),
+            "should list security category: {cats_text}"
+        );
+
+        // Step 2: Search filtered by security category
+        let search_result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "*", "category": "security"}),
+            )
+            .await;
+        assert!(!search_result.is_error);
+        let search_text = search_result.all_text();
+        assert!(
+            search_text.contains("security-audit"),
+            "should find security-audit: {search_text}"
+        );
+        assert!(
+            !search_text.contains("python-dev"),
+            "should not include non-security skills: {search_text}"
+        );
+
+        // Step 3: Info on the security skill
+        let info_result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "security-audit"}),
+            )
+            .await;
+        assert!(!info_result.is_error);
+        let info_text = info_result.all_text();
+        assert!(
+            info_text.contains("security"),
+            "info should show security category: {info_text}"
+        );
+
+        // Step 4: Metadata should be consistent
+        let metadata_result = client
+            .read_resource("skillet://metadata/joshrotenberg/security-audit")
+            .await;
+        let metadata = metadata_result.first_text().expect("should have metadata");
+        assert!(
+            metadata.contains("security"),
+            "metadata should include security category: {metadata}"
+        );
+    }
+
+    /// Files workflow: search for skill with files -> read file -> verify content
+    #[tokio::test]
+    async fn test_scenario_files_workflow() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Step 1: Info on python-dev (has extra files)
+        let info_result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "acme", "name": "python-dev"}),
+            )
+            .await;
+        assert!(!info_result.is_error);
+        let info_text = info_result.all_text();
+        assert!(
+            info_text.contains("**Files:**"),
+            "should list files: {info_text}"
+        );
+        assert!(
+            info_text.contains("scripts/lint.sh"),
+            "should mention lint.sh: {info_text}"
+        );
+
+        // Step 2: Read the script file via resource
+        let file_result = client
+            .read_resource("skillet://files/acme/python-dev/scripts/lint.sh")
+            .await;
+        let file_content = file_result.first_text().expect("should have file content");
+        assert!(
+            file_content.contains("ruff"),
+            "lint.sh should mention ruff: {file_content}"
+        );
+
+        // Step 3: Read the reference file
+        let ref_result = client
+            .read_resource("skillet://files/acme/python-dev/references/RUFF_CONFIG.md")
+            .await;
+        let ref_content = ref_result
+            .first_text()
+            .expect("should have reference content");
+        assert!(
+            ref_content.contains("pyproject.toml"),
+            "RUFF_CONFIG.md should mention pyproject.toml: {ref_content}"
+        );
+
+        // Step 4: Also read the SKILL.md to verify it's distinct from the files
+        let skill_result = client
+            .read_resource("skillet://skills/acme/python-dev")
+            .await;
+        let skill_md = skill_result.first_text().expect("should have SKILL.md");
+        assert!(
+            skill_md.contains("Python"),
+            "SKILL.md should mention Python: {skill_md}"
+        );
+    }
+
+    /// Owner browsing: list_skills_by_owner -> info on each -> verify all belong to owner
+    #[tokio::test]
+    async fn test_scenario_owner_browsing() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Step 1: List skills by joshrotenberg
+        let list_result = client
+            .call_tool(
+                "list_skills_by_owner",
+                serde_json::json!({"owner": "joshrotenberg"}),
+            )
+            .await;
+        assert!(!list_result.is_error);
+        let list_text = list_result.all_text();
+        assert!(list_text.contains("rust-dev"));
+        assert!(list_text.contains("security-audit"));
+
+        // Step 2: Info on each skill found -- all should belong to joshrotenberg
+        for skill_name in ["rust-dev", "security-audit", "code-review"] {
+            let info_result = client
+                .call_tool(
+                    "info_skill",
+                    serde_json::json!({"owner": "joshrotenberg", "name": skill_name}),
+                )
+                .await;
+            assert!(
+                !info_result.is_error,
+                "info should succeed for {skill_name}"
+            );
+            let info_text = info_result.all_text();
+            assert!(
+                info_text.contains(&format!("joshrotenberg/{skill_name}")),
+                "info should show correct owner/name for {skill_name}: {info_text}"
+            );
+        }
+    }
+
+    /// Error handling: verify graceful responses across tools and resources
+    #[tokio::test]
+    async fn test_scenario_error_handling() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Search with no results is not an error
+        let search_result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "zzz_nonexistent_xyzzy"}),
+            )
+            .await;
+        assert!(!search_result.is_error);
+        assert!(search_result.all_text().contains("No skills found"));
+
+        // Info on nonexistent skill is an error
+        let info_result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "bad", "name": "nonexistent"}),
+            )
+            .await;
+        assert!(info_result.is_error);
+        assert!(info_result.all_text().contains("not found"));
+
+        // Install nonexistent skill is an error
+        let install_result = client
+            .call_tool(
+                "install_skill",
+                serde_json::json!({"owner": "bad", "name": "nonexistent"}),
+            )
+            .await;
+        assert!(install_result.is_error);
+        assert!(install_result.all_text().contains("not found"));
+
+        // List skills by nonexistent owner is not an error (just empty)
+        let owner_result = client
+            .call_tool(
+                "list_skills_by_owner",
+                serde_json::json!({"owner": "zzz_nobody"}),
+            )
+            .await;
+        assert!(!owner_result.is_error);
+    }
+
+    /// Cross-tool consistency: search and info return consistent data
+    #[tokio::test]
+    async fn test_scenario_cross_tool_consistency() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Search returns version and description
+        let search_result = client
+            .call_tool(
+                "search_skills",
+                serde_json::json!({"query": "*", "tag": "rust"}),
+            )
+            .await;
+        let search_text = search_result.all_text();
+        assert!(search_text.contains("rust-dev"));
+
+        // Info should show the same version
+        let info_result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "rust-dev"}),
+            )
+            .await;
+        let info_text = info_result.all_text();
+
+        // Both should reference the same version string
+        assert!(
+            info_text.contains("2026.02.24"),
+            "info should show version: {info_text}"
+        );
+
+        // Metadata resource should also be consistent
+        let metadata_result = client
+            .read_resource("skillet://metadata/joshrotenberg/rust-dev")
+            .await;
+        let metadata = metadata_result.first_text().expect("metadata");
+        assert!(
+            metadata.contains("2026.02.24"),
+            "metadata should have same version: {metadata}"
+        );
+    }
+
+    /// Wildcard search then drill down into multiple skills from different owners
+    #[tokio::test]
+    async fn test_scenario_browse_all_then_drill_down() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Step 1: Wildcard search to see everything
+        let all_result = client
+            .call_tool("search_skills", serde_json::json!({"query": "*"}))
+            .await;
+        assert!(!all_result.is_error);
+        let all_text = all_result.all_text();
+        assert!(all_text.contains("Found"));
+
+        // Step 2: Pick skills from different owners and read their content
+        let skills = [
+            ("joshrotenberg", "rust-dev"),
+            ("acme", "python-dev"),
+            ("devtools", "api-design"),
+        ];
+
+        for (owner, name) in skills {
+            let resource = client
+                .read_resource(&format!("skillet://skills/{owner}/{name}"))
+                .await;
+            let content = resource
+                .first_text()
+                .unwrap_or_else(|| panic!("should have content for {owner}/{name}"));
+            assert!(
+                !content.is_empty(),
+                "SKILL.md for {owner}/{name} should not be empty"
+            );
+        }
+    }
+
     /// Build a router with limited capabilities and verify only those tools are listed.
     #[tokio::test]
     async fn test_mcp_limited_tools() {
