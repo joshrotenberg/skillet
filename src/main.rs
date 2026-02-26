@@ -228,7 +228,9 @@ struct ListArgs {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    match cli.command {
+    let is_serve = matches!(cli.command, Some(Command::Serve(_)) | None);
+
+    let exit_code = match cli.command {
         Some(Command::Validate(args)) => run_validate(args),
         Some(Command::Pack(args)) => run_pack(args),
         Some(Command::Publish(args)) => run_publish(args),
@@ -240,7 +242,14 @@ async fn main() -> ExitCode {
         Some(Command::List(args)) => run_list(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
+    };
+
+    // Check for new version after CLI commands (not during serve)
+    if !is_serve {
+        skillet_mcp::version::check_and_notify();
     }
+
+    exit_code
 }
 
 /// Run the `validate` subcommand.
