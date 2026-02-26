@@ -20,3 +20,4 @@ pub mod scaffold;
 pub mod search;
 pub mod state;
 pub mod validate;
+pub mod version;

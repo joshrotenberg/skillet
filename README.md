@@ -262,7 +262,7 @@ is fully compatible with the Agent Skills spec -- you can drop it into
 Building from source:
 
 ```
-cargo install --git https://github.com/joshrotenberg/grimoire.git
+cargo install --git https://github.com/joshrotenberg/skillet.git
 ```
 
 Requires Rust 1.90 or later.
@@ -275,5 +275,5 @@ interface are functional, and there's a
 with skills across development, devops, and security categories. The
 registry format is flat files, git-backed, with auditable history.
 
-See [issues](https://github.com/joshrotenberg/grimoire/issues) for the
+See [issues](https://github.com/joshrotenberg/skillet/issues) for the
 roadmap.
