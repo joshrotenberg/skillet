@@ -278,6 +278,48 @@ pub fn config_dir() -> PathBuf {
     }
 }
 
+/// Build a default `SkilletConfig` for first-time setup.
+///
+/// Validates the target via `InstallTarget::parse()`. Builds a config with the
+/// provided registries and target. Everything else uses struct defaults.
+pub fn generate_default_config(
+    remotes: Vec<String>,
+    local: Vec<PathBuf>,
+    target: &str,
+) -> crate::error::Result<SkilletConfig> {
+    // Validate the target string (allows "all" or any known target)
+    let _ = InstallTarget::parse(target)?;
+
+    Ok(SkilletConfig {
+        install: InstallConfig {
+            targets: vec![target.to_string()],
+            global: false,
+        },
+        registries: RegistriesConfig {
+            local,
+            remote: remotes,
+        },
+        ..Default::default()
+    })
+}
+
+/// Write a `SkilletConfig` to the default config path. Returns the path written.
+pub fn write_config(config: &SkilletConfig) -> crate::error::Result<PathBuf> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| Error::CreateDir {
+        path: dir.clone(),
+        source: e,
+    })?;
+
+    let path = dir.join("config.toml");
+    let content = toml::to_string_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
+    std::fs::write(&path, content).map_err(|e| Error::WriteFile {
+        path: path.clone(),
+        source: e,
+    })?;
+    Ok(path)
+}
+
 /// Current time as ISO 8601 string (UTC).
 ///
 /// Uses `std::time` to avoid adding a chrono dependency.
@@ -562,6 +604,59 @@ resources = ["skills", "metadata"]
     fn test_discover_local_defaults_true() {
         let config = SkilletConfig::default();
         assert!(config.server.discover_local);
+    }
+
+    #[test]
+    fn test_generate_default_config_basic() {
+        let config = generate_default_config(
+            vec!["https://example.com/repo.git".into()],
+            vec![],
+            "agents",
+        )
+        .unwrap();
+        assert_eq!(config.install.targets, vec!["agents"]);
+        assert_eq!(
+            config.registries.remote,
+            vec!["https://example.com/repo.git"]
+        );
+        assert!(config.registries.local.is_empty());
+    }
+
+    #[test]
+    fn test_generate_default_config_invalid_target() {
+        let result = generate_default_config(vec![], vec![], "invalid");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_write_config_roundtrip() {
+        let tmp = tempfile::tempdir().unwrap();
+        // Override HOME so config_dir() writes to our temp dir
+        let prev_home = std::env::var("HOME").ok();
+        // SAFETY: test is single-threaded; we restore HOME immediately after.
+        unsafe { std::env::set_var("HOME", tmp.path()) };
+
+        let config = generate_default_config(
+            vec!["https://example.com/repo.git".into()],
+            vec![],
+            "claude",
+        )
+        .unwrap();
+        let path = write_config(&config).unwrap();
+        assert!(path.exists());
+
+        let loaded = load_config_from(&path).unwrap();
+        assert_eq!(loaded.install.targets, vec!["claude"]);
+        assert_eq!(
+            loaded.registries.remote,
+            vec!["https://example.com/repo.git"]
+        );
+
+        // Restore HOME
+        if let Some(h) = prev_home {
+            // SAFETY: restoring original value.
+            unsafe { std::env::set_var("HOME", h) };
+        }
     }
 
     #[test]
