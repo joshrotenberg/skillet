@@ -139,6 +139,9 @@ pub fn build(state: Arc<AppState>) -> Tool {
                                 .join(", ")
                         ));
                     }
+                    if let Some(ref label) = s.source_label {
+                        output.push_str(&format!("**Source:** {label}\n"));
+                    }
                     if let Some(ref status) = s.integrity {
                         let label = if status == "verified" {
                             "**Integrity:** verified"

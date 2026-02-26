@@ -20,6 +20,14 @@ const STOP_WORDS: &[&str] = &[
     "need",
 ];
 
+/// Truncate text to at most `max_chars` characters for indexing.
+fn truncate_for_index(text: &str, max_chars: usize) -> &str {
+    match text.char_indices().nth(max_chars) {
+        Some((idx, _)) => &text[..idx],
+        None => text,
+    }
+}
+
 /// Search index over skills, backed by BM25.
 pub struct SkillSearch {
     index: Bm25Index,
@@ -52,6 +60,7 @@ impl SkillSearch {
                     "trigger": info.trigger.as_deref().unwrap_or(""),
                     "categories": categories,
                     "tags": tags,
+                    "content": truncate_for_index(&v.skill_md, 500),
                 }))
             })
             .collect();
@@ -63,6 +72,7 @@ impl SkillSearch {
             ("trigger".to_string(), 1.5),
             ("categories".to_string(), 1.0),
             ("tags".to_string(), 1.0),
+            ("content".to_string(), 0.5),
         ]);
 
         let options = IndexOptions {
@@ -73,6 +83,7 @@ impl SkillSearch {
                 "trigger".to_string(),
                 "categories".to_string(),
                 "tags".to_string(),
+                "content".to_string(),
             ],
             id_field: Some("id".to_string()),
             stopwords: STOP_WORDS.iter().map(|s| s.to_string()).collect(),
@@ -113,6 +124,7 @@ mod tests {
         SkillEntry {
             owner: owner.to_string(),
             name: name.to_string(),
+            source: Default::default(),
             versions: vec![SkillVersion {
                 version: "1.0.0".to_string(),
                 metadata: SkillMetadata {
@@ -260,5 +272,24 @@ mod tests {
             names.contains(&"python-dev"),
             "should find python-dev (has 'testing' in desc): {names:?}"
         );
+    }
+
+    #[test]
+    fn test_search_finds_skill_via_content() {
+        // Create a skill with sparse metadata but rich SKILL.md content
+        let mut entry = make_entry("local", "minimal-skill", "Local skill", &[]);
+        entry.versions[0].skill_md =
+            "# Kubernetes Deployment\n\nDeploy pods to k8s clusters with helm charts.".to_string();
+
+        let mut skills = HashMap::new();
+        skills.insert(("local".to_string(), "minimal-skill".to_string()), entry);
+        let idx = SkillIndex {
+            skills,
+            ..Default::default()
+        };
+        let search = SkillSearch::build(&idx);
+        let results = search.search("kubernetes", 10);
+        assert!(!results.is_empty(), "should find skill via content match");
+        assert_eq!(results[0].1, "minimal-skill");
     }
 }

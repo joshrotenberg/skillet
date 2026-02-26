@@ -28,13 +28,30 @@ pub struct SkilletConfig {
 ///
 /// Tools: `search`, `categories`, `owner`, `install`
 /// Resources: `skills`, `metadata`, `files`
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
     /// Tool short names to expose. Empty = all.
     pub tools: Vec<String>,
     /// Resource short names to expose. Empty = all.
     pub resources: Vec<String>,
+    /// Auto-discover skills from local agent directories (default: true).
+    #[serde(default = "default_discover_local")]
+    pub discover_local: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            tools: Vec::new(),
+            resources: Vec::new(),
+            discover_local: true,
+        }
+    }
+}
+
+fn default_discover_local() -> bool {
+    true
 }
 
 /// `[safety]` section: rule suppression for safety scanning.
@@ -499,6 +516,7 @@ targets = ["gemini"]
         let config = SkilletConfig::default();
         assert!(config.server.tools.is_empty());
         assert!(config.server.resources.is_empty());
+        assert!(config.server.discover_local);
     }
 
     #[test]
@@ -536,5 +554,30 @@ resources = ["skills", "metadata"]
         let config = load_config_from(&path).unwrap();
         assert_eq!(config.server.tools, vec!["search", "categories"]);
         assert_eq!(config.server.resources, vec!["skills", "metadata"]);
+        // discover_local defaults to true when not specified
+        assert!(config.server.discover_local);
+    }
+
+    #[test]
+    fn test_discover_local_defaults_true() {
+        let config = SkilletConfig::default();
+        assert!(config.server.discover_local);
+    }
+
+    #[test]
+    fn test_discover_local_opt_out() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[server]
+discover_local = false
+"#,
+        )
+        .unwrap();
+
+        let config = load_config_from(&path).unwrap();
+        assert!(!config.server.discover_local);
     }
 }

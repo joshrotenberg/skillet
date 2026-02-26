@@ -7,6 +7,7 @@
 pub mod bm25;
 pub mod cache;
 pub mod config;
+pub mod discover;
 pub mod error;
 pub mod git;
 pub mod index;

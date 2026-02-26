@@ -37,11 +37,30 @@ pub fn build(state: Arc<AppState>) -> ResourceTemplate {
                     tower_mcp::Error::tool(format!("No published versions for '{owner}/{name}'"))
                 })?;
 
+                let content = if version.skill_toml_raw.is_empty() {
+                    // Synthesize metadata for discovered local skills
+                    let info = &version.metadata.skill;
+                    format!(
+                        "# Auto-discovered local skill (no skill.toml on disk)\n\
+                         [skill]\n\
+                         name = \"{}\"\n\
+                         owner = \"{}\"\n\
+                         version = \"{}\"\n\
+                         description = \"{}\"\n",
+                        info.name,
+                        info.owner,
+                        info.version,
+                        info.description.replace('"', "\\\""),
+                    )
+                } else {
+                    version.skill_toml_raw.clone()
+                };
+
                 Ok(ReadResourceResult {
                     contents: vec![ResourceContent {
                         uri,
                         mime_type: Some("application/toml".to_string()),
-                        text: Some(version.skill_toml_raw.clone()),
+                        text: Some(content),
                         blob: None,
                         meta: None,
                     }],

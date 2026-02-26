@@ -23,8 +23,8 @@ use skillet_mcp::manifest;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
 use skillet_mcp::{
-    git, index, integrity, pack, publish, registry, safety, scaffold, search, state, trust,
-    validate,
+    discover, git, index, integrity, pack, publish, registry, safety, scaffold, search, state,
+    trust, validate,
 };
 
 #[derive(Parser, Debug)]
@@ -1730,6 +1730,9 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
 
     tracing::info!(count = registry_paths.len(), "Starting skillet server");
 
+    // Load CLI config early (used for discovery and capabilities)
+    let cli_config = config::load_config().unwrap_or_default();
+
     // Load and merge all registries
     let mut merged_index = state::SkillIndex::default();
     let mut config = state::RegistryConfig::default();
@@ -1741,6 +1744,15 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
         let idx = index::load_index(path)?;
         merged_index.merge(idx);
+    }
+
+    // Auto-discover locally installed skills
+    if cli_config.server.discover_local {
+        let local_index = discover::discover_local_skills();
+        if !local_index.skills.is_empty() {
+            tracing::info!(count = local_index.skills.len(), "Discovered local skills");
+            merged_index.merge(local_index);
+        }
     }
 
     let skill_search = search::SkillSearch::build(&merged_index);
@@ -1780,8 +1792,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         spawn_watch_task(Arc::clone(&state));
     }
 
-    // Resolve which tools/resources to expose
-    let cli_config = config::load_config().unwrap_or_default();
+    // Resolve which tools/resources to expose (cli_config loaded earlier)
     let caps = ServerCapabilities::resolve(&args, &cli_config);
     tracing::info!(
         tools = ?caps.tools.iter().collect::<Vec<_>>(),
@@ -1828,6 +1839,18 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
                         "Failed to reload registry, skipping"
                     );
                 }
+            }
+        }
+        // Re-discover local skills (never cached, always live from disk)
+        let cli_config = config::load_config().unwrap_or_default();
+        if cli_config.server.discover_local {
+            let local_index = discover::discover_local_skills();
+            if !local_index.skills.is_empty() {
+                tracing::info!(
+                    count = local_index.skills.len(),
+                    "Re-discovered local skills"
+                );
+                merged.merge(local_index);
             }
         }
         merged
@@ -2423,6 +2446,7 @@ mod tests {
             server: config::ServerConfig {
                 tools: vec!["search".to_string(), "owner".to_string()],
                 resources: Vec::new(),
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -2443,6 +2467,7 @@ mod tests {
             server: config::ServerConfig {
                 tools: Vec::new(),
                 resources: vec!["skills".to_string(), "metadata".to_string()],
+                ..Default::default()
             },
             ..Default::default()
         };
@@ -2468,6 +2493,7 @@ mod tests {
                     "owner".to_string(),
                 ],
                 resources: vec!["skills".to_string(), "metadata".to_string()],
+                ..Default::default()
             },
             ..Default::default()
         };

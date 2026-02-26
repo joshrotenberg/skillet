@@ -1,7 +1,7 @@
 //! Shared application state and data models
 
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -166,12 +166,47 @@ impl SkillIndex {
     }
 }
 
+/// Where a skill was discovered from.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SkillSource {
+    /// From a git-backed registry with skill.toml
+    #[default]
+    Registry,
+    /// Auto-discovered from a local agent skills directory
+    Local {
+        /// Agent platform (e.g. "claude", "agents")
+        platform: String,
+        /// Absolute path to the skill directory on disk
+        path: PathBuf,
+    },
+}
+
+impl SkillSource {
+    /// Returns the platform label for local skills, or `None` for registry skills.
+    pub fn label(&self) -> Option<String> {
+        match self {
+            Self::Registry => None,
+            Self::Local { platform, .. } => Some(format!("local ({platform})")),
+        }
+    }
+
+    /// Returns the on-disk path for local skills.
+    pub fn path(&self) -> Option<&Path> {
+        match self {
+            Self::Registry => None,
+            Self::Local { path, .. } => Some(path),
+        }
+    }
+}
+
 /// A skill with all its versions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
     pub owner: String,
     pub name: String,
     pub versions: Vec<SkillVersion>,
+    #[serde(default)]
+    pub source: SkillSource,
 }
 
 impl SkillEntry {
@@ -323,6 +358,9 @@ pub struct SkillSummary {
     /// Integrity verification status: "verified", "failed", or absent
     #[serde(skip_serializing_if = "Option::is_none")]
     pub integrity: Option<String>,
+    /// Source label for display (e.g. "local (claude)")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_label: Option<String>,
 }
 
 impl SkillSummary {
@@ -362,6 +400,7 @@ impl SkillSummary {
             available_versions,
             content_hash: v.content_hash.clone(),
             integrity,
+            source_label: entry.source.label(),
         })
     }
 }
