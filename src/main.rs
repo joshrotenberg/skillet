@@ -6,6 +6,7 @@
 mod resources;
 mod tools;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -101,6 +102,22 @@ struct ServeArgs {
     /// Log level
     #[arg(short, long, default_value = "info")]
     log_level: String,
+
+    /// Read-only mode: don't expose the install_skill tool
+    #[arg(long, conflicts_with = "tools")]
+    read_only: bool,
+
+    /// Don't expose the install_skill tool
+    #[arg(long, conflicts_with = "tools")]
+    no_install: bool,
+
+    /// Explicit tool allowlist (comma-separated: search,categories,owner,install)
+    #[arg(long, value_delimiter = ',')]
+    tools: Vec<String>,
+
+    /// Explicit resource allowlist (comma-separated: skills,metadata,files)
+    #[arg(long, value_delimiter = ',')]
+    resources: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -1474,57 +1491,165 @@ fn print_safety_report(report: &safety::SafetyReport) {
     }
 }
 
-/// Build an MCP router from a loaded AppState.
-fn build_router(state: Arc<AppState>) -> McpRouter {
-    let search_skills = tools::search_skills::build(state.clone());
-    let list_categories = tools::list_categories::build(state.clone());
-    let list_skills_by_owner = tools::list_skills_by_owner::build(state.clone());
-    let install_skill = tools::install_skill::build(state.clone());
+/// All known tool short names.
+const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "install"];
 
-    let skill_content = resources::skill_content::build(state.clone());
-    let skill_content_versioned = resources::skill_content::build_versioned(state.clone());
-    let skill_metadata = resources::skill_metadata::build(state.clone());
-    let skill_files = resources::skill_files::build(state.clone());
+/// All known resource short names.
+const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files"];
 
-    McpRouter::new()
-        .server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"))
-        .instructions(
-            "Skillet is a skill registry for AI agents. Use it to discover and \
-             fetch skills relevant to your current task.\n\n\
-             Tools:\n\
-             - search_skills: Search for skills by keyword, category, tag, or model\n\
-             - list_categories: Browse all skill categories\n\
-             - list_skills_by_owner: List all skills by a publisher\n\
-             - install_skill: Install a skill to the local filesystem for persistent use\n\n\
-             Resources:\n\
-             - skillet://skills/{owner}/{name}: Get a skill's SKILL.md content\n\
-             - skillet://skills/{owner}/{name}/{version}: Get a specific version\n\
-             - skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)\n\
-             - skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
-             (scripts, references, or assets)\n\n\
-             Workflow: search for skills with tools, then fetch the SKILL.md content \
-             via resource templates. You can use the skill inline for this session \
-             or install it locally for persistent use. If a skill includes extra \
-             files (scripts, references), fetch them via the files resource.\n\n\
-             Using skills:\n\
-             - **Inline (default)**: Read the resource and follow the skill's \
-             instructions for the current session. No restart needed.\n\
-             - **Install**: Use the install_skill tool to write SKILL.md to the \
+/// Resolved set of capabilities to expose from the MCP server.
+struct ServerCapabilities {
+    tools: HashSet<String>,
+    resources: HashSet<String>,
+}
+
+impl ServerCapabilities {
+    /// Resolve capabilities from CLI flags and config.
+    ///
+    /// Priority: CLI flags > config > defaults (all exposed).
+    fn resolve(args: &ServeArgs, cli_config: &config::SkilletConfig) -> Self {
+        let tools = if !args.tools.is_empty() {
+            args.tools.iter().cloned().collect()
+        } else if args.read_only || args.no_install {
+            ALL_TOOL_NAMES
+                .iter()
+                .filter(|&&t| t != "install")
+                .map(|&s| s.to_string())
+                .collect()
+        } else if !cli_config.server.tools.is_empty() {
+            cli_config.server.tools.iter().cloned().collect()
+        } else {
+            ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect()
+        };
+
+        let resources = if !args.resources.is_empty() {
+            args.resources.iter().cloned().collect()
+        } else if !cli_config.server.resources.is_empty() {
+            cli_config.server.resources.iter().cloned().collect()
+        } else {
+            ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect()
+        };
+
+        Self { tools, resources }
+    }
+}
+
+/// Build an MCP router from a loaded AppState and resolved capabilities.
+fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
+    let mut router =
+        McpRouter::new().server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"));
+
+    // Register tools conditionally
+    if caps.tools.contains("search") {
+        router = router.tool(tools::search_skills::build(state.clone()));
+    }
+    if caps.tools.contains("categories") {
+        router = router.tool(tools::list_categories::build(state.clone()));
+    }
+    if caps.tools.contains("owner") {
+        router = router.tool(tools::list_skills_by_owner::build(state.clone()));
+    }
+    if caps.tools.contains("install") {
+        router = router.tool(tools::install_skill::build(state.clone()));
+    }
+
+    // Register resources conditionally
+    if caps.resources.contains("skills") {
+        router = router.resource_template(resources::skill_content::build(state.clone()));
+        router = router.resource_template(resources::skill_content::build_versioned(state.clone()));
+    }
+    if caps.resources.contains("metadata") {
+        router = router.resource_template(resources::skill_metadata::build(state.clone()));
+    }
+    if caps.resources.contains("files") {
+        router = router.resource_template(resources::skill_files::build(state.clone()));
+    }
+
+    // Build dynamic instructions based on exposed capabilities
+    router = router.instructions(build_instructions(caps));
+
+    router
+}
+
+/// Generate MCP instructions text listing only exposed tools and resources.
+fn build_instructions(caps: &ServerCapabilities) -> String {
+    let mut text = String::from(
+        "Skillet is a skill registry for AI agents. Use it to discover and \
+         fetch skills relevant to your current task.\n\n",
+    );
+
+    // Tools section
+    let mut tool_lines = Vec::new();
+    if caps.tools.contains("search") {
+        tool_lines.push("- search_skills: Search for skills by keyword, category, tag, or model");
+    }
+    if caps.tools.contains("categories") {
+        tool_lines.push("- list_categories: Browse all skill categories");
+    }
+    if caps.tools.contains("owner") {
+        tool_lines.push("- list_skills_by_owner: List all skills by a publisher");
+    }
+    if caps.tools.contains("install") {
+        tool_lines
+            .push("- install_skill: Install a skill to the local filesystem for persistent use");
+    }
+    if !tool_lines.is_empty() {
+        text.push_str("Tools:\n");
+        for line in &tool_lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text.push('\n');
+    }
+
+    // Resources section
+    let mut resource_lines = Vec::new();
+    if caps.resources.contains("skills") {
+        resource_lines.push("- skillet://skills/{owner}/{name}: Get a skill's SKILL.md content");
+        resource_lines.push("- skillet://skills/{owner}/{name}/{version}: Get a specific version");
+    }
+    if caps.resources.contains("metadata") {
+        resource_lines
+            .push("- skillet://metadata/{owner}/{name}: Get a skill's metadata (skill.toml)");
+    }
+    if caps.resources.contains("files") {
+        resource_lines.push(
+            "- skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
+             (scripts, references, or assets)",
+        );
+    }
+    if !resource_lines.is_empty() {
+        text.push_str("Resources:\n");
+        for line in &resource_lines {
+            text.push_str(line);
+            text.push('\n');
+        }
+        text.push('\n');
+    }
+
+    // Workflow guidance
+    text.push_str(
+        "Workflow: search for skills with tools, then fetch the SKILL.md content \
+         via resource templates. You can use the skill inline for this session \
+         or install it locally for persistent use. If a skill includes extra \
+         files (scripts, references), fetch them via the files resource.\n\n\
+         Using skills:\n\
+         - **Inline (default)**: Read the resource and follow the skill's \
+         instructions for the current session. No restart needed.\n",
+    );
+    if caps.tools.contains("install") {
+        text.push_str(
+            "- **Install**: Use the install_skill tool to write SKILL.md to the \
              appropriate agent skills directory. Supports multiple targets \
              (agents, claude, cursor, copilot, windsurf, gemini) and project \
              or global scope. A restart may be required.\n\
              - **Install and use**: Install for persistence AND follow \
              the instructions inline for immediate use.\n\n\
              Prefer inline use unless the user asks for installation.",
-        )
-        .tool(search_skills)
-        .tool(list_categories)
-        .tool(list_skills_by_owner)
-        .tool(install_skill)
-        .resource_template(skill_content)
-        .resource_template(skill_content_versioned)
-        .resource_template(skill_metadata)
-        .resource_template(skill_files)
+        );
+    }
+
+    text
 }
 
 /// Run the MCP server (default behavior / `serve` subcommand).
@@ -1557,7 +1682,7 @@ async fn run_serve(args: ServeArgs) -> ExitCode {
 }
 
 async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
-    let cache_base = args.cache_dir.unwrap_or_else(default_cache_dir);
+    let cache_base = args.cache_dir.clone().unwrap_or_else(default_cache_dir);
     let mut registry_paths = Vec::new();
 
     // Resolve local registries
@@ -1655,7 +1780,16 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         spawn_watch_task(Arc::clone(&state));
     }
 
-    let router = build_router(state);
+    // Resolve which tools/resources to expose
+    let cli_config = config::load_config().unwrap_or_default();
+    let caps = ServerCapabilities::resolve(&args, &cli_config);
+    tracing::info!(
+        tools = ?caps.tools.iter().collect::<Vec<_>>(),
+        resources = ?caps.resources.iter().collect::<Vec<_>>(),
+        "Exposing MCP capabilities"
+    );
+
+    let router = build_router(state, &caps);
 
     if let Some(addr) = args.http {
         tracing::info!(addr = %addr, "Serving over HTTP");
@@ -1905,7 +2039,11 @@ mod tests {
             skill_search,
             config,
         );
-        build_router(state)
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        build_router(state, &caps)
     }
 
     #[tokio::test]
@@ -2187,5 +2325,192 @@ mod tests {
             .await;
 
         assert!(error.get("code").is_some());
+    }
+
+    /// Build a default ServeArgs for testing capability resolution.
+    fn default_serve_args() -> ServeArgs {
+        ServeArgs {
+            registry: Vec::new(),
+            remote: Vec::new(),
+            refresh_interval: "5m".to_string(),
+            cache_dir: None,
+            subdir: None,
+            watch: false,
+            http: None,
+            log_level: "info".to_string(),
+            read_only: false,
+            no_install: false,
+            tools: Vec::new(),
+            resources: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_caps_default_all() {
+        let args = default_serve_args();
+        let config = config::SkilletConfig::default();
+        let caps = ServerCapabilities::resolve(&args, &config);
+        for &name in ALL_TOOL_NAMES {
+            assert!(caps.tools.contains(name), "should contain tool {name}");
+        }
+        for &name in ALL_RESOURCE_NAMES {
+            assert!(
+                caps.resources.contains(name),
+                "should contain resource {name}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_caps_no_install() {
+        let args = ServeArgs {
+            no_install: true,
+            ..default_serve_args()
+        };
+        let config = config::SkilletConfig::default();
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert!(caps.tools.contains("search"));
+        assert!(caps.tools.contains("categories"));
+        assert!(caps.tools.contains("owner"));
+        assert!(!caps.tools.contains("install"));
+    }
+
+    #[test]
+    fn test_caps_read_only_same_as_no_install() {
+        let args = ServeArgs {
+            read_only: true,
+            ..default_serve_args()
+        };
+        let config = config::SkilletConfig::default();
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert!(!caps.tools.contains("install"));
+        assert!(caps.tools.contains("search"));
+    }
+
+    #[test]
+    fn test_caps_explicit_tools() {
+        let args = ServeArgs {
+            tools: vec!["search".to_string(), "categories".to_string()],
+            ..default_serve_args()
+        };
+        let config = config::SkilletConfig::default();
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert_eq!(caps.tools.len(), 2);
+        assert!(caps.tools.contains("search"));
+        assert!(caps.tools.contains("categories"));
+        assert!(!caps.tools.contains("install"));
+        assert!(!caps.tools.contains("owner"));
+    }
+
+    #[test]
+    fn test_caps_explicit_resources() {
+        let args = ServeArgs {
+            resources: vec!["skills".to_string()],
+            ..default_serve_args()
+        };
+        let config = config::SkilletConfig::default();
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert_eq!(caps.resources.len(), 1);
+        assert!(caps.resources.contains("skills"));
+        assert!(!caps.resources.contains("metadata"));
+        assert!(!caps.resources.contains("files"));
+    }
+
+    #[test]
+    fn test_caps_config_tools() {
+        let args = default_serve_args();
+        let config = config::SkilletConfig {
+            server: config::ServerConfig {
+                tools: vec!["search".to_string(), "owner".to_string()],
+                resources: Vec::new(),
+            },
+            ..Default::default()
+        };
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert_eq!(caps.tools.len(), 2);
+        assert!(caps.tools.contains("search"));
+        assert!(caps.tools.contains("owner"));
+        // Resources should default to all
+        for &name in ALL_RESOURCE_NAMES {
+            assert!(caps.resources.contains(name));
+        }
+    }
+
+    #[test]
+    fn test_caps_config_resources() {
+        let args = default_serve_args();
+        let config = config::SkilletConfig {
+            server: config::ServerConfig {
+                tools: Vec::new(),
+                resources: vec!["skills".to_string(), "metadata".to_string()],
+            },
+            ..Default::default()
+        };
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert_eq!(caps.resources.len(), 2);
+        assert!(caps.resources.contains("skills"));
+        assert!(caps.resources.contains("metadata"));
+        assert!(!caps.resources.contains("files"));
+    }
+
+    #[test]
+    fn test_caps_cli_overrides_config() {
+        let args = ServeArgs {
+            tools: vec!["search".to_string()],
+            resources: vec!["files".to_string()],
+            ..default_serve_args()
+        };
+        let config = config::SkilletConfig {
+            server: config::ServerConfig {
+                tools: vec![
+                    "search".to_string(),
+                    "categories".to_string(),
+                    "owner".to_string(),
+                ],
+                resources: vec!["skills".to_string(), "metadata".to_string()],
+            },
+            ..Default::default()
+        };
+        let caps = ServerCapabilities::resolve(&args, &config);
+        assert_eq!(caps.tools.len(), 1);
+        assert!(caps.tools.contains("search"));
+        assert_eq!(caps.resources.len(), 1);
+        assert!(caps.resources.contains("files"));
+    }
+
+    /// Build a router with limited capabilities and verify only those tools are listed.
+    #[tokio::test]
+    async fn test_mcp_limited_tools() {
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let skill_index = index::load_index(&registry_path).expect("load index");
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ["search", "categories"]
+                .iter()
+                .map(|&s| s.to_string())
+                .collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let tools = client.list_tools().await;
+        let names: Vec<&str> = tools
+            .iter()
+            .filter_map(|t| t.get("name").and_then(|n| n.as_str()))
+            .collect();
+        assert!(names.contains(&"search_skills"));
+        assert!(names.contains(&"list_categories"));
+        assert!(!names.contains(&"install_skill"));
+        assert!(!names.contains(&"list_skills_by_owner"));
     }
 }
