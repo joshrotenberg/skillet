@@ -20,7 +20,7 @@ use skillet_mcp::install::{self, InstallOptions};
 use skillet_mcp::manifest;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
-use skillet_mcp::{git, index, pack, publish, registry, search, state, validate};
+use skillet_mcp::{git, index, pack, publish, registry, scaffold, search, state, validate};
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
@@ -47,6 +47,8 @@ enum Command {
     Publish(PublishArgs),
     /// Initialize a new skill registry
     InitRegistry(InitRegistryArgs),
+    /// Scaffold a new skillpack directory
+    InitSkill(InitSkillArgs),
     /// Install a skill from a registry
     Install(InstallArgs),
     /// Search for skills in registries
@@ -113,6 +115,24 @@ struct InitRegistryArgs {
     /// Registry name (defaults to directory name)
     #[arg(long)]
     name: Option<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct InitSkillArgs {
+    /// Path for the new skillpack (e.g. owner/skill-name)
+    path: PathBuf,
+
+    /// Skill description
+    #[arg(long)]
+    description: Option<String>,
+
+    /// Skill categories (can be specified multiple times)
+    #[arg(long)]
+    category: Vec<String>,
+
+    /// Skill tags (comma-separated)
+    #[arg(long, value_delimiter = ',')]
+    tags: Vec<String>,
 }
 
 #[derive(clap::Args, Debug)]
@@ -208,6 +228,7 @@ async fn main() -> ExitCode {
         Some(Command::Pack(args)) => run_pack(args),
         Some(Command::Publish(args)) => run_publish(args),
         Some(Command::InitRegistry(args)) => run_init_registry(args),
+        Some(Command::InitSkill(args)) => run_init_skill(args),
         Some(Command::Install(args)) => run_install(args),
         Some(Command::Search(args)) => run_search(args),
         Some(Command::Info(args)) => run_info(args),
@@ -392,6 +413,68 @@ fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
     println!("  # add skills: mkdir -p owner/skill-name");
     println!("  # serve locally: skillet --registry .");
     println!("  # push and serve remotely: skillet --remote <git-url>");
+
+    ExitCode::SUCCESS
+}
+
+/// Run the `init-skill` subcommand.
+fn run_init_skill(args: InitSkillArgs) -> ExitCode {
+    let path = &args.path;
+
+    // Infer owner/name from path components
+    let name = match path.file_name().and_then(|n| n.to_str()) {
+        Some(n) if !n.is_empty() => n.to_string(),
+        _ => {
+            eprintln!("Error: could not infer skill name from path");
+            return ExitCode::from(1);
+        }
+    };
+
+    let owner = match path
+        .parent()
+        .and_then(|p| p.file_name())
+        .and_then(|n| n.to_str())
+    {
+        Some(o) if !o.is_empty() => o.to_string(),
+        _ => {
+            eprintln!(
+                "Error: could not infer owner from path. Use owner/skill-name format (e.g. myname/my-skill)"
+            );
+            return ExitCode::from(1);
+        }
+    };
+
+    let description = args
+        .description
+        .unwrap_or_else(|| format!("A skill for {name}"));
+
+    if let Err(e) = scaffold::init_skill(
+        path,
+        &owner,
+        &name,
+        &description,
+        &args.category,
+        &args.tags,
+    ) {
+        eprintln!("Error: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Created skillpack at {}", path.display());
+    println!();
+    println!("  owner ................. {owner}");
+    println!("  name .................. {name}");
+    println!();
+    println!("Next steps:");
+    println!(
+        "  1. Edit {}/skill.toml to customize metadata",
+        path.display()
+    );
+    println!(
+        "  2. Edit {}/SKILL.md to write your skill prompt",
+        path.display()
+    );
+    println!("  3. Validate: skillet validate {}", path.display());
 
     ExitCode::SUCCESS
 }
