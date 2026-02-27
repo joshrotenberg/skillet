@@ -67,7 +67,7 @@ fn compute_composite(files: &BTreeMap<String, String>) -> String {
 /// Format: one line per entry, `<hash>  <path>`. The composite hash uses
 /// `*` as its path. Files are expected to be sorted alphabetically.
 /// Blank lines and lines starting with `#` are ignored.
-pub fn parse_manifest(content: &str) -> anyhow::Result<ContentHashes> {
+pub fn parse_manifest(content: &str) -> crate::error::Result<ContentHashes> {
     let mut files = BTreeMap::new();
     let mut composite = None;
 
@@ -79,7 +79,9 @@ pub fn parse_manifest(content: &str) -> anyhow::Result<ContentHashes> {
 
         // Format: "sha256:<hex>  <path>"
         let Some((hash, path)) = line.split_once("  ") else {
-            anyhow::bail!("Invalid manifest line (expected two-space separator): {line}");
+            return Err(crate::error::Error::ManifestFormatError {
+                line: line.to_string(),
+            });
         };
 
         let hash = hash.trim().to_string();
@@ -92,9 +94,7 @@ pub fn parse_manifest(content: &str) -> anyhow::Result<ContentHashes> {
         }
     }
 
-    let composite = composite.ok_or_else(|| {
-        anyhow::anyhow!("MANIFEST.sha256 missing composite hash (line with '*' path)")
-    })?;
+    let composite = composite.ok_or(crate::error::Error::ManifestMissingComposite)?;
 
     Ok(ContentHashes { files, composite })
 }

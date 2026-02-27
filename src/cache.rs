@@ -176,7 +176,7 @@ pub fn write(source: &RegistrySource, index: &SkillIndex) {
 }
 
 /// Remove all index cache files.
-pub fn clear() -> anyhow::Result<()> {
+pub fn clear() -> crate::error::Result<()> {
     let dir = cache_dir();
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;

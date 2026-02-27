@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use anyhow::bail;
+use crate::error::Error;
 
 /// Initialize a new skillpack at the given path.
 ///
@@ -15,9 +15,12 @@ pub fn init_skill(
     description: &str,
     categories: &[String],
     tags: &[String],
-) -> anyhow::Result<()> {
+) -> crate::error::Result<()> {
     if path.exists() {
-        bail!("{} already exists", path.display());
+        return Err(Error::Scaffold(format!(
+            "{} already exists",
+            path.display()
+        )));
     }
 
     std::fs::create_dir_all(path)?;

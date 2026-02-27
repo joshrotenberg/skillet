@@ -7,8 +7,7 @@
 
 use std::path::Path;
 
-use anyhow::{Context, bail};
-
+use crate::error::Error;
 use crate::integrity;
 use crate::state::{
     RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
@@ -20,17 +19,21 @@ use crate::validate;
 ///
 /// If the file is absent, returns sensible defaults. If present but
 /// malformed, returns an error (fail loud rather than silently defaulting).
-pub fn load_config(registry_path: &Path) -> anyhow::Result<RegistryConfig> {
+pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig> {
     let config_path = registry_path.join("config.toml");
     if !config_path.is_file() {
         tracing::debug!("No config.toml found, using defaults");
         return Ok(RegistryConfig::default());
     }
 
-    let raw = std::fs::read_to_string(&config_path)
-        .with_context(|| format!("Failed to read {}", config_path.display()))?;
-    let config: RegistryConfig = toml::from_str(&raw)
-        .with_context(|| format!("Failed to parse {}", config_path.display()))?;
+    let raw = std::fs::read_to_string(&config_path).map_err(|e| Error::FileRead {
+        path: config_path.clone(),
+        source: e,
+    })?;
+    let config: RegistryConfig = toml::from_str(&raw).map_err(|e| Error::TomlParse {
+        path: config_path.clone(),
+        source: e,
+    })?;
 
     tracing::info!(name = %config.registry.name, "Loaded registry config");
     Ok(config)
@@ -51,23 +54,21 @@ pub fn load_config(registry_path: &Path) -> anyhow::Result<RegistryConfig> {
 ///   owner2/
 ///     ...
 /// ```
-pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
+pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     let mut index = SkillIndex::default();
 
     if !registry_path.is_dir() {
-        bail!(
-            "Registry path does not exist or is not a directory: {}",
-            registry_path.display()
-        );
+        return Err(Error::SkillLoad {
+            path: registry_path.to_path_buf(),
+            reason: "registry path does not exist or is not a directory".to_string(),
+        });
     }
 
     // Iterate over owner directories
     let mut owners: Vec<_> = std::fs::read_dir(registry_path)
-        .with_context(|| {
-            format!(
-                "Failed to read registry directory: {}",
-                registry_path.display()
-            )
+        .map_err(|e| Error::FileRead {
+            path: registry_path.to_path_buf(),
+            source: e,
         })?
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
@@ -84,11 +85,9 @@ pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
 
         // Iterate over skill directories within this owner
         let mut skills: Vec<_> = std::fs::read_dir(owner_entry.path())
-            .with_context(|| {
-                format!(
-                    "Failed to read owner directory: {}",
-                    owner_entry.path().display()
-                )
+            .map_err(|e| Error::FileRead {
+                path: owner_entry.path(),
+                source: e,
             })?
             .filter_map(|e| e.ok())
             .filter(|e| e.path().is_dir())
@@ -148,23 +147,27 @@ pub fn load_index(registry_path: &Path) -> anyhow::Result<SkillIndex> {
 /// `has_content = false`.
 ///
 /// Without `versions.toml`, behaves exactly as before (single version).
-fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry> {
+fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<SkillEntry> {
     let validated = validate::validate_skillpack(dir)?;
 
     // Registry-specific: owner/name must match directory structure
     if validated.owner != owner {
-        bail!(
-            "Owner mismatch: skill.toml says '{}' but directory is '{}'",
-            validated.owner,
-            owner
-        );
+        return Err(Error::SkillLoad {
+            path: dir.to_path_buf(),
+            reason: format!(
+                "owner mismatch: skill.toml says '{}' but directory is '{}'",
+                validated.owner, owner
+            ),
+        });
     }
     if validated.name != name {
-        bail!(
-            "Name mismatch: skill.toml says '{}' but directory is '{}'",
-            validated.name,
-            name
-        );
+        return Err(Error::SkillLoad {
+            path: dir.to_path_buf(),
+            reason: format!(
+                "name mismatch: skill.toml says '{}' but directory is '{}'",
+                validated.name, name
+            ),
+        });
     }
 
     let versions_path = dir.join("versions.toml");
@@ -202,24 +205,33 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> anyhow::Result<SkillEntry>
 fn load_versions_manifest(
     path: &Path,
     current_metadata: &SkillMetadata,
-) -> anyhow::Result<Vec<SkillVersion>> {
-    let raw = std::fs::read_to_string(path)
-        .with_context(|| format!("Failed to read {}", path.display()))?;
-    let manifest: VersionsManifest =
-        toml::from_str(&raw).with_context(|| format!("Failed to parse {}", path.display()))?;
+) -> crate::error::Result<Vec<SkillVersion>> {
+    let raw = std::fs::read_to_string(path).map_err(|e| Error::FileRead {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
+    let manifest: VersionsManifest = toml::from_str(&raw).map_err(|e| Error::TomlParse {
+        path: path.to_path_buf(),
+        source: e,
+    })?;
 
     if manifest.versions.is_empty() {
-        bail!("versions.toml has no entries in {}", path.display());
+        return Err(Error::SkillLoad {
+            path: path.to_path_buf(),
+            reason: "versions.toml has no entries".to_string(),
+        });
     }
 
     // The last entry's version must match skill.toml's version
     let last = manifest.versions.last().unwrap();
     if last.version != current_metadata.skill.version {
-        bail!(
-            "Version mismatch: last entry in versions.toml is '{}' but skill.toml says '{}'",
-            last.version,
-            current_metadata.skill.version
-        );
+        return Err(Error::SkillLoad {
+            path: path.to_path_buf(),
+            reason: format!(
+                "Version mismatch: last entry in versions.toml is '{}' but skill.toml says '{}'",
+                last.version, current_metadata.skill.version
+            ),
+        });
     }
 
     // We need the on-disk content for the last entry. Re-read from the parent
@@ -228,10 +240,14 @@ fn load_versions_manifest(
     let toml_path = skill_dir.join("skill.toml");
     let md_path = skill_dir.join("SKILL.md");
 
-    let skill_toml_raw = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("Failed to read {}", toml_path.display()))?;
-    let skill_md = std::fs::read_to_string(&md_path)
-        .with_context(|| format!("Failed to read {}", md_path.display()))?;
+    let skill_toml_raw = std::fs::read_to_string(&toml_path).map_err(|e| Error::FileRead {
+        path: toml_path.clone(),
+        source: e,
+    })?;
+    let skill_md = std::fs::read_to_string(&md_path).map_err(|e| Error::FileRead {
+        path: md_path.clone(),
+        source: e,
+    })?;
     let files = load_extra_files(skill_dir)?;
 
     let total = manifest.versions.len();
@@ -352,7 +368,7 @@ pub const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets"];
 /// Load extra files from scripts/, references/, and assets/ subdirectories.
 pub fn load_extra_files(
     skill_dir: &Path,
-) -> anyhow::Result<std::collections::HashMap<String, SkillFile>> {
+) -> crate::error::Result<std::collections::HashMap<String, SkillFile>> {
     let mut files = std::collections::HashMap::new();
 
     for subdir_name in EXTRA_DIRS {
@@ -361,8 +377,10 @@ pub fn load_extra_files(
             continue;
         }
 
-        let entries = std::fs::read_dir(&subdir)
-            .with_context(|| format!("Failed to read {}", subdir.display()))?;
+        let entries = std::fs::read_dir(&subdir).map_err(|e| Error::FileRead {
+            path: subdir.clone(),
+            source: e,
+        })?;
 
         for entry in entries.flatten() {
             let path = entry.path();

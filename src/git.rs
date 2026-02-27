@@ -6,55 +6,76 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{Context, bail};
+use crate::error::Error;
 
 /// Clone a repository to the target directory (shallow by default).
-pub fn clone(url: &str, target: &Path) -> anyhow::Result<()> {
-    let status = Command::new("git")
+pub fn clone(url: &str, target: &Path) -> crate::error::Result<()> {
+    let output = Command::new("git")
         .args(["clone", "--depth", "1", url])
         .arg(target)
-        .status()
-        .context("Failed to run git clone")?;
+        .output()
+        .map_err(|e| Error::Io {
+            context: "failed to run git clone".to_string(),
+            source: e,
+        })?;
 
-    if !status.success() {
-        bail!("git clone failed with status {status}");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: format!("clone {url}"),
+            stderr,
+        });
     }
 
     Ok(())
 }
 
 /// Pull latest changes in an existing clone.
-pub fn pull(repo_path: &Path) -> anyhow::Result<()> {
-    let status = Command::new("git")
+pub fn pull(repo_path: &Path) -> crate::error::Result<()> {
+    let output = Command::new("git")
         .args(["pull"])
         .current_dir(repo_path)
-        .status()
-        .context("Failed to run git pull")?;
+        .output()
+        .map_err(|e| Error::Io {
+            context: "failed to run git pull".to_string(),
+            source: e,
+        })?;
 
-    if !status.success() {
-        bail!("git pull failed with status {status}");
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "pull".to_string(),
+            stderr,
+        });
     }
 
     Ok(())
 }
 
 /// Get the current HEAD commit hash.
-pub fn head(repo_path: &Path) -> anyhow::Result<String> {
+pub fn head(repo_path: &Path) -> crate::error::Result<String> {
     let output = Command::new("git")
         .args(["rev-parse", "HEAD"])
         .current_dir(repo_path)
         .output()
-        .context("Failed to run git rev-parse HEAD")?;
+        .map_err(|e| Error::Io {
+            context: "failed to run git rev-parse HEAD".to_string(),
+            source: e,
+        })?;
 
     if !output.status.success() {
-        bail!("git rev-parse HEAD failed with status {}", output.status);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "rev-parse HEAD".to_string(),
+            stderr,
+        });
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
 /// Clone if the target doesn't exist, otherwise pull.
-pub fn clone_or_pull(url: &str, target: &Path) -> anyhow::Result<()> {
+pub fn clone_or_pull(url: &str, target: &Path) -> crate::error::Result<()> {
     if target.join(".git").exists() {
         tracing::info!(path = %target.display(), "Pulling existing clone");
         pull(target)

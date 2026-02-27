@@ -7,8 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use anyhow::{Context, bail};
-
+use crate::error::Error;
 use crate::index;
 use crate::integrity;
 use crate::state::{KNOWN_CAPABILITIES, SkillFile, SkillMetadata};
@@ -36,60 +35,78 @@ pub struct ValidationResult {
 /// Checks that `skill.toml` and `SKILL.md` exist and parse correctly,
 /// required fields are present and well-formed, extra files load, and
 /// content hashes are computed. If `MANIFEST.sha256` exists, it is verified.
-pub fn validate_skillpack(dir: &Path) -> anyhow::Result<ValidationResult> {
+pub fn validate_skillpack(dir: &Path) -> crate::error::Result<ValidationResult> {
     let mut warnings = Vec::new();
 
     // 1. skill.toml must exist and parse
     let toml_path = dir.join("skill.toml");
     if !toml_path.is_file() {
-        bail!("skill.toml not found in {}", dir.display());
+        return Err(Error::Validation(format!(
+            "skill.toml not found in {}",
+            dir.display()
+        )));
     }
 
-    let skill_toml_raw = std::fs::read_to_string(&toml_path)
-        .with_context(|| format!("Failed to read {}", toml_path.display()))?;
+    let skill_toml_raw = std::fs::read_to_string(&toml_path).map_err(|e| Error::FileRead {
+        path: toml_path.clone(),
+        source: e,
+    })?;
 
-    let metadata: SkillMetadata = toml::from_str(&skill_toml_raw)
-        .with_context(|| format!("Failed to parse {}", toml_path.display()))?;
+    let metadata: SkillMetadata =
+        toml::from_str(&skill_toml_raw).map_err(|e| Error::TomlParse {
+            path: toml_path.clone(),
+            source: e,
+        })?;
 
     // 2. SKILL.md must exist and be non-empty
     let md_path = dir.join("SKILL.md");
     if !md_path.is_file() {
-        bail!("SKILL.md not found in {}", dir.display());
+        return Err(Error::Validation(format!(
+            "SKILL.md not found in {}",
+            dir.display()
+        )));
     }
 
-    let skill_md = std::fs::read_to_string(&md_path)
-        .with_context(|| format!("Failed to read {}", md_path.display()))?;
+    let skill_md = std::fs::read_to_string(&md_path).map_err(|e| Error::FileRead {
+        path: md_path.clone(),
+        source: e,
+    })?;
 
     if skill_md.trim().is_empty() {
-        bail!("SKILL.md is empty in {}", dir.display());
+        return Err(Error::Validation(format!(
+            "SKILL.md is empty in {}",
+            dir.display()
+        )));
     }
 
     // 3. Required fields: name, owner, version, description
     let info = &metadata.skill;
 
     if info.name.is_empty() || info.name.contains(char::is_whitespace) {
-        bail!(
+        return Err(Error::Validation(format!(
             "Invalid skill name '{}': must be non-empty with no whitespace",
             info.name
-        );
+        )));
     }
 
     if info.owner.is_empty() || info.owner.contains(char::is_whitespace) {
-        bail!(
+        return Err(Error::Validation(format!(
             "Invalid owner '{}': must be non-empty with no whitespace",
             info.owner
-        );
+        )));
     }
 
     if info.version.is_empty() || info.version.contains(char::is_whitespace) {
-        bail!(
+        return Err(Error::Validation(format!(
             "Invalid version '{}': must be non-empty with no whitespace",
             info.version
-        );
+        )));
     }
 
     if info.description.is_empty() {
-        bail!("Description must not be empty");
+        return Err(Error::Validation(
+            "Description must not be empty".to_string(),
+        ));
     }
 
     // 4. Load extra files from scripts/, references/, assets/
