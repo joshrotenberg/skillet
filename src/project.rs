@@ -263,6 +263,98 @@ pub fn find_skillet_toml(start: &Path) -> Option<PathBuf> {
     }
 }
 
+/// Parsed YAML frontmatter fields from a SKILL.md file.
+///
+/// npm-style skill repos (redis/agent-skills, anthropics/skills, etc.)
+/// store metadata in YAML frontmatter rather than `skill.toml`. This struct
+/// captures the standard fields used across those repos.
+#[derive(Debug, Clone, Default)]
+pub struct Frontmatter {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub version: Option<String>,
+    pub license: Option<String>,
+    pub author: Option<String>,
+    pub tags: Vec<String>,
+}
+
+/// Parse YAML frontmatter from SKILL.md content.
+///
+/// Handles the simple key-value format used in npm skill repos:
+/// ```text
+/// ---
+/// name: my-skill
+/// description: A helpful skill
+/// version: 1.0.0
+/// tags: [caching, redis]
+/// ---
+/// ```
+///
+/// Returns `None` if the content doesn't start with `---` frontmatter.
+/// This is a simple line-by-line parser (no YAML dependency) matching
+/// the existing pattern in `validate.rs`.
+pub fn parse_frontmatter(skill_md: &str) -> Option<Frontmatter> {
+    let mut lines = skill_md.lines();
+
+    // First line must be "---"
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+
+    let mut fm = Frontmatter::default();
+
+    for line in lines {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            // End of frontmatter
+            return Some(fm);
+        }
+
+        // Skip empty lines and comments inside frontmatter
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        // Parse "key: value" pairs
+        let Some((key, value)) = trimmed.split_once(':') else {
+            continue;
+        };
+
+        let key = key.trim();
+        let value = value.trim();
+        // Strip optional surrounding quotes
+        let value = value
+            .strip_prefix('"')
+            .and_then(|v| v.strip_suffix('"'))
+            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
+            .unwrap_or(value);
+
+        match key {
+            "name" => fm.name = Some(value.to_string()),
+            "description" => fm.description = Some(value.to_string()),
+            "version" => fm.version = Some(value.to_string()),
+            "license" => fm.license = Some(value.to_string()),
+            "author" => fm.author = Some(value.to_string()),
+            "tags" => {
+                // Parse inline array: [tag1, tag2] or comma-separated
+                let inner = value
+                    .strip_prefix('[')
+                    .and_then(|v| v.strip_suffix(']'))
+                    .unwrap_or(value);
+                fm.tags = inner
+                    .split(',')
+                    .map(|t| t.trim().trim_matches('"').trim_matches('\'').to_string())
+                    .filter(|t| !t.is_empty())
+                    .collect();
+            }
+            _ => {} // Ignore unknown keys (metadata.*, etc.)
+        }
+    }
+
+    // Reached end of file without closing "---"
+    None
+}
+
 /// Infer skill metadata from directory context when `skill.toml` is absent.
 ///
 /// Uses the directory name as the skill name, and attempts to resolve the
@@ -275,6 +367,8 @@ pub fn infer_metadata(
     skill_md: &str,
     manifest: Option<&SkilletToml>,
 ) -> crate::state::SkillMetadata {
+    let frontmatter = parse_frontmatter(skill_md);
+
     let name = skill_dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -282,7 +376,29 @@ pub fn infer_metadata(
         .to_string();
 
     let owner = infer_owner(skill_dir, manifest);
-    let description = extract_description(skill_md);
+
+    // Precedence: manifest > frontmatter > inference
+    let description = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.description.clone())
+        .unwrap_or_else(|| extract_description(skill_md));
+
+    let version = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.version.clone())
+        .unwrap_or_else(|| "0.1.0".to_string());
+
+    let license = manifest
+        .and_then(|m| m.project.as_ref())
+        .and_then(|p| p.license.clone())
+        .or_else(|| frontmatter.as_ref().and_then(|fm| fm.license.clone()));
+
+    let author = frontmatter.as_ref().and_then(|fm| {
+        fm.author.as_ref().map(|a| crate::state::AuthorInfo {
+            name: Some(a.clone()),
+            github: None,
+        })
+    });
 
     let (categories, tags) = if let Some(m) = manifest {
         let cats = m
@@ -290,14 +406,24 @@ pub fn infer_metadata(
             .as_ref()
             .map(|p| p.categories.clone())
             .unwrap_or_default();
-        let tags = m
+        let mut tags = m
             .project
             .as_ref()
             .map(|p| p.tags.clone())
             .unwrap_or_default();
+        // Merge frontmatter tags if manifest has none
+        if tags.is_empty()
+            && let Some(ref fm) = frontmatter
+        {
+            tags = fm.tags.clone();
+        }
         (cats, tags)
     } else {
-        (Vec::new(), Vec::new())
+        let tags = frontmatter
+            .as_ref()
+            .map(|fm| fm.tags.clone())
+            .unwrap_or_default();
+        (Vec::new(), tags)
     };
 
     let classification = if !categories.is_empty() || !tags.is_empty() {
@@ -310,13 +436,11 @@ pub fn infer_metadata(
         skill: crate::state::SkillInfo {
             name,
             owner,
-            version: "0.1.0".to_string(),
+            version,
             description,
             trigger: None,
-            license: manifest
-                .and_then(|m| m.project.as_ref())
-                .and_then(|p| p.license.clone()),
-            author: None,
+            license,
+            author,
             classification,
             compatibility: None,
         },
@@ -599,6 +723,8 @@ fn build_embedded_entry_from_dir(
         anyhow::bail!("SKILL.md is empty at {}", skill_dir.display());
     }
 
+    let frontmatter = parse_frontmatter(&skill_md);
+
     let name = skill_dir
         .file_name()
         .and_then(|n| n.to_str())
@@ -606,7 +732,30 @@ fn build_embedded_entry_from_dir(
         .to_string();
 
     let owner = infer_owner(skill_dir, Some(manifest));
-    let description = extract_description(&skill_md);
+
+    // Precedence: frontmatter > extract_description fallback
+    let description = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.description.clone())
+        .unwrap_or_else(|| extract_description(&skill_md));
+
+    let version = frontmatter
+        .as_ref()
+        .and_then(|fm| fm.version.clone())
+        .unwrap_or_else(|| "0.1.0".to_string());
+
+    let license = manifest
+        .project
+        .as_ref()
+        .and_then(|p| p.license.clone())
+        .or_else(|| frontmatter.as_ref().and_then(|fm| fm.license.clone()));
+
+    let author = frontmatter.as_ref().and_then(|fm| {
+        fm.author.as_ref().map(|a| crate::state::AuthorInfo {
+            name: Some(a.clone()),
+            github: None,
+        })
+    });
 
     let categories = manifest
         .project
@@ -614,11 +763,16 @@ fn build_embedded_entry_from_dir(
         .map(|p| p.categories.clone())
         .unwrap_or_default();
 
-    let tags = manifest
+    let mut tags = manifest
         .project
         .as_ref()
         .map(|p| p.tags.clone())
         .unwrap_or_default();
+    if tags.is_empty()
+        && let Some(ref fm) = frontmatter
+    {
+        tags = fm.tags.clone();
+    }
 
     let classification = if !categories.is_empty() || !tags.is_empty() {
         Some(crate::state::Classification { categories, tags })
@@ -635,11 +789,11 @@ fn build_embedded_entry_from_dir(
         skill: crate::state::SkillInfo {
             name: name.clone(),
             owner: owner.clone(),
-            version: "0.1.0".to_string(),
+            version: version.clone(),
             description,
             trigger: None,
-            license: manifest.project.as_ref().and_then(|p| p.license.clone()),
-            author: None,
+            license,
+            author,
             classification,
             compatibility: None,
         },
@@ -654,7 +808,7 @@ fn build_embedded_entry_from_dir(
             path: skill_dir.to_path_buf(),
         },
         versions: vec![crate::state::SkillVersion {
-            version: "0.1.0".to_string(),
+            version,
             metadata,
             skill_md,
             skill_toml_raw,
@@ -1191,6 +1345,98 @@ path = ".skillet"
             index
                 .skills
                 .contains_key(&("dev".to_string(), "extra".to_string()))
+        );
+    }
+
+    // ── Frontmatter parsing tests ────────────────────────────────────
+
+    #[test]
+    fn test_parse_frontmatter_basic() {
+        let md = "---\nname: my-skill\ndescription: A helpful skill\nversion: 1.2.0\nlicense: MIT\nauthor: Alice\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse frontmatter");
+        assert_eq!(fm.name.as_deref(), Some("my-skill"));
+        assert_eq!(fm.description.as_deref(), Some("A helpful skill"));
+        assert_eq!(fm.version.as_deref(), Some("1.2.0"));
+        assert_eq!(fm.license.as_deref(), Some("MIT"));
+        assert_eq!(fm.author.as_deref(), Some("Alice"));
+        assert!(fm.tags.is_empty());
+    }
+
+    #[test]
+    fn test_parse_frontmatter_with_tags() {
+        let md = "---\nname: redis-caching\ntags: [caching, redis, performance]\n---\n\n# Redis\n";
+        let fm = parse_frontmatter(md).expect("should parse frontmatter");
+        assert_eq!(fm.name.as_deref(), Some("redis-caching"));
+        assert_eq!(fm.tags, vec!["caching", "redis", "performance"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_quoted_values() {
+        let md = "---\nname: \"quoted-skill\"\ndescription: 'single quoted'\n---\n";
+        let fm = parse_frontmatter(md).expect("should parse frontmatter");
+        assert_eq!(fm.name.as_deref(), Some("quoted-skill"));
+        assert_eq!(fm.description.as_deref(), Some("single quoted"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_no_frontmatter() {
+        let md = "# Just a heading\n\nNo frontmatter here.\n";
+        assert!(parse_frontmatter(md).is_none());
+    }
+
+    #[test]
+    fn test_parse_frontmatter_empty_content() {
+        assert!(parse_frontmatter("").is_none());
+    }
+
+    #[test]
+    fn test_parse_frontmatter_unclosed() {
+        let md = "---\nname: broken\n";
+        assert!(
+            parse_frontmatter(md).is_none(),
+            "unclosed frontmatter should return None"
+        );
+    }
+
+    #[test]
+    fn test_infer_metadata_uses_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let skill_md = "---\ndescription: From frontmatter\nversion: 3.0.0\ntags: [fast, cool]\n---\n\n# Heading\n\nBody text.\n";
+        let metadata = infer_metadata(&skill_dir, skill_md, None);
+
+        assert_eq!(metadata.skill.name, "my-skill");
+        assert_eq!(metadata.skill.version, "3.0.0");
+        assert_eq!(metadata.skill.description, "From frontmatter");
+        assert_eq!(
+            metadata.skill.classification.as_ref().unwrap().tags,
+            vec!["fast", "cool"]
+        );
+    }
+
+    #[test]
+    fn test_infer_metadata_manifest_overrides_frontmatter_tags() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let manifest = SkilletToml {
+            project: Some(ProjectSection {
+                tags: vec!["manifest-tag".to_string()],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let skill_md = "---\ntags: [fm-tag]\n---\n\n# Heading\n";
+        let metadata = infer_metadata(&skill_dir, skill_md, Some(&manifest));
+
+        // Manifest tags take precedence over frontmatter tags
+        assert_eq!(
+            metadata.skill.classification.as_ref().unwrap().tags,
+            vec!["manifest-tag"]
         );
     }
 }
