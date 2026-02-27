@@ -1,0 +1,14 @@
+[skill]
+name = "maven-build"
+owner = "acme"
+version = "1.0.0"
+description = "Maven build configuration and dependency management for Java projects"
+license = "MIT"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["java", "build-tools"]
+tags = ["maven", "java", "pom", "dependencies"]

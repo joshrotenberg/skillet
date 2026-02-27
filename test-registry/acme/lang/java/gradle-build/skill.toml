@@ -1,0 +1,14 @@
+[skill]
+name = "gradle-build"
+owner = "acme"
+version = "1.0.0"
+description = "Gradle build configuration and Kotlin DSL patterns for Java/Kotlin projects"
+license = "MIT"
+
+[skill.author]
+name = "Acme Corp"
+github = "acme"
+
+[skill.classification]
+categories = ["java", "build-tools"]
+tags = ["gradle", "kotlin", "java", "build"]

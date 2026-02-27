@@ -497,7 +497,130 @@ fn scenario_reinstall_overwrites() {
     );
 }
 
+// ── Nested registry ─────────────────────────────────────────────────
+
+/// Search and install skills from a registry with nested directory structure
+#[test]
+fn scenario_nested_registry_skills() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let tmp_home = tempfile::tempdir().expect("create temp home");
+    let registry = tmp.path().join("registry");
+
+    std::fs::create_dir_all(&registry).expect("create registry dir");
+    write_registry_config(&registry, "nested-test");
+
+    // Create flat skill
+    create_mini_skill(&registry, "teamx", "code-style", "Team coding standards");
+
+    // Create nested skills: teamx/lang/java/maven-build
+    create_nested_mini_skill(
+        &registry,
+        "teamx",
+        &["lang", "java"],
+        "maven-build",
+        "Maven build patterns",
+    );
+
+    // Create nested skills: teamx/lang/java/gradle-build
+    create_nested_mini_skill(
+        &registry,
+        "teamx",
+        &["lang", "java"],
+        "gradle-build",
+        "Gradle build patterns",
+    );
+
+    // Create deeper nested: teamx/platform/cloud/aws/lambda-deploy
+    create_nested_mini_skill(
+        &registry,
+        "teamx",
+        &["platform", "cloud", "aws"],
+        "lambda-deploy",
+        "AWS Lambda deployment skill",
+    );
+
+    // Step 1: Search should find all skills including nested ones
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&registry)
+        .env("HOME", tmp_home.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("maven-build"))
+        .stdout(predicate::str::contains("gradle-build"))
+        .stdout(predicate::str::contains("lambda-deploy"))
+        .stdout(predicate::str::contains("code-style"));
+
+    // Step 2: Info on a nested skill
+    skillet()
+        .args(["info", "teamx/maven-build", "--registry"])
+        .arg(&registry)
+        .env("HOME", tmp_home.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Maven build patterns"));
+
+    // Step 3: Install a nested skill
+    skillet()
+        .args([
+            "install",
+            "teamx/maven-build",
+            "--target",
+            "agents",
+            "--registry",
+        ])
+        .arg(&registry)
+        .env("HOME", tmp_home.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Step 4: Verify installed file matches source
+    let installed_md = tmp.path().join(".agents/skills/maven-build/SKILL.md");
+    let content = std::fs::read_to_string(&installed_md).expect("read installed SKILL.md");
+    assert!(
+        content.contains("Maven build patterns"),
+        "installed content should match source"
+    );
+
+    // Step 5: List should show the nested skill
+    skillet()
+        .args(["list"])
+        .env("HOME", tmp_home.path())
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("teamx/maven-build"));
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
+
+fn create_nested_mini_skill(
+    registry: &std::path::Path,
+    owner: &str,
+    groups: &[&str],
+    name: &str,
+    description: &str,
+) {
+    let mut skill_dir = registry.join(owner);
+    for group in groups {
+        skill_dir = skill_dir.join(group);
+    }
+    skill_dir = skill_dir.join(name);
+    std::fs::create_dir_all(&skill_dir).expect("create nested skill dir");
+
+    let toml = format!(
+        "[skill]\nname = \"{name}\"\nowner = \"{owner}\"\nversion = \"1.0.0\"\ndescription = \"{description}\"\n"
+    );
+    std::fs::write(skill_dir.join("skill.toml"), toml).expect("write skill.toml");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        format!("# {name}\n\n{description}\n"),
+    )
+    .expect("write SKILL.md");
+}
 
 fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, description: &str) {
     let skill_dir = registry.join(owner).join(name);
