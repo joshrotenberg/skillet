@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::error::Error;
+use crate::index::EXTRA_DIRS;
 use crate::pack::{self, PackResult};
 
 /// Result of publishing a skillpack.
@@ -141,8 +142,8 @@ fn copy_skillpack(src: &Path, dst: &Path) -> crate::error::Result<()> {
         })?;
     }
 
-    // Extra directories: scripts/, references/, assets/
-    for subdir in &["scripts", "references", "assets"] {
+    // Extra directories (scripts/, references/, assets/, rules/, templates/)
+    for subdir in EXTRA_DIRS {
         let sub_src = src.join(subdir);
         if sub_src.is_dir() {
             copy_dir_recursive(&sub_src, &dst.join(subdir))?;
@@ -272,4 +273,149 @@ fn git_in(dir: &Path, args: &[&str]) -> crate::error::Result<String> {
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// Set up a source dir that mimics a packed skillpack.
+    fn make_skillpack(dir: &Path) {
+        std::fs::write(dir.join("skill.toml"), "[skill]\nname = \"test\"").unwrap();
+        std::fs::write(dir.join("SKILL.md"), "# Test Skill").unwrap();
+        std::fs::write(dir.join("MANIFEST.sha256"), "abc123  SKILL.md").unwrap();
+    }
+
+    #[test]
+    fn copy_skillpack_copies_required_files() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("skill.toml").exists());
+        assert!(dst.path().join("SKILL.md").exists());
+        assert!(dst.path().join("MANIFEST.sha256").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_copies_versions_toml() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+        std::fs::write(src.path().join("versions.toml"), "[[versions]]").unwrap();
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("versions.toml").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_copies_readme() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+        std::fs::write(src.path().join("README.md"), "# Readme").unwrap();
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("README.md").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_copies_scripts_dir() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+        std::fs::create_dir(src.path().join("scripts")).unwrap();
+        std::fs::write(src.path().join("scripts/lint.sh"), "#!/bin/bash").unwrap();
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("scripts/lint.sh").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_copies_rules_dir() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+        std::fs::create_dir(src.path().join("rules")).unwrap();
+        std::fs::write(src.path().join("rules/cache-patterns.md"), "# Patterns").unwrap();
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("rules/cache-patterns.md").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_copies_templates_dir() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+        std::fs::create_dir(src.path().join("templates")).unwrap();
+        std::fs::write(src.path().join("templates/config.toml"), "key = \"val\"").unwrap();
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(dst.path().join("templates/config.toml").exists());
+    }
+
+    #[test]
+    fn copy_skillpack_fails_missing_required() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        let result = copy_skillpack(src.path(), dst.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn copy_skillpack_skips_absent_optional_dirs() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        make_skillpack(src.path());
+
+        copy_skillpack(src.path(), dst.path()).unwrap();
+
+        assert!(!dst.path().join("scripts").exists());
+        assert!(!dst.path().join("rules").exists());
+        assert!(!dst.path().join("templates").exists());
+        assert!(!dst.path().join("README.md").exists());
+        assert!(!dst.path().join("versions.toml").exists());
+    }
+
+    #[test]
+    fn copy_dir_recursive_copies_nested() {
+        let src = TempDir::new().unwrap();
+        let dst = TempDir::new().unwrap();
+        let sub = src.path().join("a").join("b");
+        std::fs::create_dir_all(&sub).unwrap();
+        std::fs::write(sub.join("file.txt"), "nested content").unwrap();
+        std::fs::write(src.path().join("a").join("top.txt"), "top content").unwrap();
+
+        let dest = dst.path().join("out");
+        copy_dir_recursive(src.path().join("a").as_path(), &dest).unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(dest.join("top.txt")).unwrap(),
+            "top content"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dest.join("b/file.txt")).unwrap(),
+            "nested content"
+        );
+    }
+
+    #[test]
+    fn publish_dry_run_fails_before_gh() {
+        // Dry run still requires pack() to succeed. We verify the error
+        // comes from pack (validation), not from the gh CLI check.
+        let dir = TempDir::new().unwrap();
+        let result = publish(dir.path(), "owner/repo", None, true);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(!err.contains("gh CLI"), "dry_run should not reach gh check");
+    }
 }
