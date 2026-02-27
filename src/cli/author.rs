@@ -3,7 +3,9 @@ use std::process::ExitCode;
 use skillet_mcp::{config, pack, publish, registry, safety, scaffold, validate};
 
 use super::print_safety_report;
-use crate::{InitRegistryArgs, InitSkillArgs, PackArgs, PublishArgs, ValidateArgs};
+use crate::{
+    InitProjectArgs, InitRegistryArgs, InitSkillArgs, PackArgs, PublishArgs, ValidateArgs,
+};
 
 /// Run the `validate` subcommand.
 pub(crate) fn run_validate(args: ValidateArgs) -> ExitCode {
@@ -240,7 +242,7 @@ pub(crate) fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
         })
         .unwrap_or_else(|| "my-skills".to_string());
 
-    if let Err(e) = registry::init_registry(path, &name, args.description.as_deref()) {
+    if let Err(e) = registry::init_registry(path, &name, args.description.as_deref(), args.legacy) {
         eprintln!("Error: {e}");
         return ExitCode::from(1);
     }
@@ -313,6 +315,78 @@ pub(crate) fn run_init_skill(args: InitSkillArgs) -> ExitCode {
         path.display()
     );
     println!("  3. Validate: skillet validate {}", path.display());
+
+    ExitCode::SUCCESS
+}
+
+/// Run the `init-project` subcommand.
+pub(crate) fn run_init_project(args: InitProjectArgs) -> ExitCode {
+    let path = &args.path;
+
+    // Ensure directory exists (for "." it already does)
+    if !path.exists()
+        && let Err(e) = std::fs::create_dir_all(path)
+    {
+        eprintln!("Error creating directory: {e}");
+        return ExitCode::from(1);
+    }
+
+    let name = args
+        .name
+        .or_else(|| {
+            // Resolve "." to absolute path for name inference
+            let resolved = if path == std::path::Path::new(".") {
+                std::env::current_dir().ok()
+            } else {
+                Some(path.to_path_buf())
+            };
+            resolved.and_then(|p| p.file_name().map(|n| n.to_string_lossy().to_string()))
+        })
+        .unwrap_or_else(|| "my-project".to_string());
+
+    let opts = scaffold::InitProjectOptions {
+        name: &name,
+        description: args.description.as_deref(),
+        include_skill: args.skill,
+        include_multi: args.multi,
+        include_registry: args.registry,
+    };
+
+    if let Err(e) = scaffold::init_project(path, &opts) {
+        eprintln!("Error: {e}");
+        return ExitCode::from(1);
+    }
+
+    println!("Created skillet.toml at {}", path.display());
+    println!();
+    println!("  project ............... {name}");
+    if args.skill {
+        println!("  [skill] ............... included");
+    }
+    if args.multi {
+        println!("  [skills] .............. included (.skillet/)");
+    }
+    if args.registry {
+        println!("  [registry] ............ included");
+    }
+    println!();
+    println!("Next steps:");
+    println!(
+        "  1. Edit {}/skillet.toml to customize project metadata",
+        path.display()
+    );
+    if args.skill {
+        println!(
+            "  2. Edit {}/SKILL.md to write your skill prompt",
+            path.display()
+        );
+    }
+    if args.multi {
+        println!(
+            "  2. Add skills to {}/.skillet/ (each needs a SKILL.md)",
+            path.display()
+        );
+    }
 
     ExitCode::SUCCESS
 }

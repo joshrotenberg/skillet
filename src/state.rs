@@ -179,22 +179,30 @@ pub enum SkillSource {
         /// Absolute path to the skill directory on disk
         path: PathBuf,
     },
+    /// Embedded in a project via `skillet.toml`
+    Embedded {
+        /// Project name from the manifest
+        project: String,
+        /// Absolute path to the skill directory on disk
+        path: PathBuf,
+    },
 }
 
 impl SkillSource {
-    /// Returns the platform label for local skills, or `None` for registry skills.
+    /// Returns a human-readable label for the source, or `None` for registry skills.
     pub fn label(&self) -> Option<String> {
         match self {
             Self::Registry => None,
             Self::Local { platform, .. } => Some(format!("local ({platform})")),
+            Self::Embedded { project, .. } => Some(format!("embedded ({project})")),
         }
     }
 
-    /// Returns the on-disk path for local skills.
+    /// Returns the on-disk path for local or embedded skills.
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::Registry => None,
-            Self::Local { path, .. } => Some(path),
+            Self::Local { path, .. } | Self::Embedded { path, .. } => Some(path),
         }
     }
 }
