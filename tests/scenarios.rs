@@ -14,6 +14,10 @@ fn test_registry() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
 }
 
+fn test_npm_registry() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+}
+
 #[allow(deprecated)]
 fn skillet() -> Command {
     Command::cargo_bin("skillet").expect("binary exists")
@@ -584,4 +588,92 @@ fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, descri
 fn write_registry_config(registry: &std::path::Path, name: &str) {
     let config = format!("[registry]\nname = \"{name}\"\n");
     std::fs::write(registry.join("config.toml"), config).expect("write config.toml");
+}
+
+// ── npm repo compatibility ───────────────────────────────────────
+
+/// search -> info -> install with rules/ files -> verify rules written to disk
+#[test]
+fn scenario_npm_repo_compatibility() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Step 1: Search finds all 3 skills
+    let search_output = skillet()
+        .args(["search", "*", "--registry"])
+        .arg(test_npm_registry())
+        .output()
+        .expect("search");
+    let search_stdout = String::from_utf8_lossy(&search_output.stdout);
+    assert!(
+        search_stdout.contains("redis-caching"),
+        "search should find redis-caching: {search_stdout}"
+    );
+    assert!(
+        search_stdout.contains("vector-search"),
+        "search should find vector-search: {search_stdout}"
+    );
+    assert!(
+        search_stdout.contains("session-management"),
+        "search should find session-management: {search_stdout}"
+    );
+
+    // Step 2: Info shows frontmatter metadata
+    skillet()
+        .args(["info", "redis/redis-caching", "--registry"])
+        .arg(test_npm_registry())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("2.1.0").and(predicate::str::contains("caching")));
+
+    // Step 3: Install skill with rules/ files
+    skillet()
+        .args(["install", "redis/redis-caching", "--registry"])
+        .arg(test_npm_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed redis/redis-caching"));
+
+    // Step 4: Verify files written to disk
+    let skill_dir = tmp.path().join(".agents/skills/redis-caching");
+    assert!(skill_dir.join("SKILL.md").exists(), "SKILL.md should exist");
+    assert!(
+        skill_dir.join("rules/cache-patterns.md").exists(),
+        "rules/cache-patterns.md should exist"
+    );
+    assert!(
+        skill_dir.join("rules/ttl-guidelines.md").exists(),
+        "rules/ttl-guidelines.md should exist"
+    );
+
+    // Step 5: Verify content matches source
+    let installed_md =
+        std::fs::read_to_string(skill_dir.join("SKILL.md")).expect("read installed SKILL.md");
+    let source_md =
+        std::fs::read_to_string(test_npm_registry().join("skills/redis-caching/SKILL.md"))
+            .expect("read source SKILL.md");
+    assert_eq!(
+        installed_md, source_md,
+        "installed SKILL.md should match source"
+    );
+
+    // Step 6: Install skill with references/
+    skillet()
+        .args(["install", "redis/vector-search", "--registry"])
+        .arg(test_npm_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    let vs_dir = tmp.path().join(".agents/skills/vector-search");
+    assert!(
+        vs_dir.join("references/embedding-guide.md").exists(),
+        "references/embedding-guide.md should exist"
+    );
 }

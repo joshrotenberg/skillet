@@ -1,0 +1,12 @@
+[project]
+name = "redis-skills"
+description = "Redis agent skills for AI assistants"
+license = "MIT"
+categories = ["database"]
+
+[[project.authors]]
+name = "Redis, Inc."
+github = "redis"
+
+[skills]
+path = "skills"

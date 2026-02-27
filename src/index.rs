@@ -86,6 +86,31 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
         });
     }
 
+    // Check for skillet.toml with [skill] or [skills] sections.
+    // This bridges npm-style skill repos (flat skills/<name>/ layout)
+    // so they work as registries without the owner/skill/ nesting.
+    if let Some(manifest) = project::load_skillet_toml(registry_path)?
+        && (manifest.skill.is_some() || manifest.skills.is_some())
+    {
+        tracing::info!(
+            path = %registry_path.display(),
+            "Loading npm-style skill repo via skillet.toml manifest"
+        );
+        let embedded = project::load_embedded_skills(registry_path, &manifest);
+        // Update category counts from embedded index
+        for entry in embedded.skills.values() {
+            if let Some(v) = entry.latest()
+                && let Some(ref c) = v.metadata.skill.classification
+            {
+                for cat in &c.categories {
+                    *index.categories.entry(cat.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+        index.skills = embedded.skills;
+        return Ok(index);
+    }
+
     // Iterate over owner directories
     let mut owners: Vec<_> = std::fs::read_dir(registry_path)
         .map_err(|e| Error::FileRead {
@@ -471,8 +496,11 @@ fn verify_manifest(
     }
 }
 
-/// Allowed subdirectories in a skillpack (per Agent Skills spec)
-pub const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets"];
+/// Allowed subdirectories in a skillpack (per Agent Skills spec).
+///
+/// Includes `rules/` and `templates/` for compatibility with npm-style
+/// skill repos (redis/agent-skills, anthropics/skills, etc.).
+pub const EXTRA_DIRS: &[&str] = &["scripts", "references", "assets", "rules", "templates"];
 
 /// Load extra files from scripts/, references/, and assets/ subdirectories.
 pub fn load_extra_files(
@@ -1229,6 +1257,152 @@ description = "Just a description, nothing else new"
         assert_eq!(
             latest.metadata.skill.description, "First collider",
             "first collision path (a/) should win"
+        );
+    }
+
+    // ── npm-style repo compatibility tests ───────────────────────────
+
+    fn test_npm_registry() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+    }
+
+    #[test]
+    fn test_load_extra_files_rules_dir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(skill_dir.join("rules")).unwrap();
+        std::fs::write(
+            skill_dir.join("rules/cache-patterns.md"),
+            "# Cache Patterns\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(skill_dir.join("templates")).unwrap();
+        std::fs::write(skill_dir.join("templates/config.toml"), "[default]\n").unwrap();
+
+        let files = load_extra_files(&skill_dir).expect("should load extra files");
+        assert!(
+            files.contains_key("rules/cache-patterns.md"),
+            "rules/ files should be loaded: {files:?}"
+        );
+        assert!(
+            files.contains_key("templates/config.toml"),
+            "templates/ files should be loaded: {files:?}"
+        );
+    }
+
+    #[test]
+    fn test_load_index_npm_style() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // Create npm-style layout: skillet.toml + skills/<name>/SKILL.md
+        std::fs::write(
+            root.join("skillet.toml"),
+            r#"
+[project]
+name = "test-npm"
+
+[[project.authors]]
+github = "testorg"
+
+[skills]
+path = "skills"
+"#,
+        )
+        .unwrap();
+
+        let skill_a = root.join("skills/alpha");
+        std::fs::create_dir_all(&skill_a).unwrap();
+        std::fs::write(skill_a.join("SKILL.md"), "# Alpha\n\nAlpha skill.\n").unwrap();
+
+        let skill_b = root.join("skills/beta");
+        std::fs::create_dir_all(&skill_b).unwrap();
+        std::fs::write(
+            skill_b.join("SKILL.md"),
+            "---\nversion: 2.0.0\ndescription: Beta from frontmatter\n---\n\n# Beta\n",
+        )
+        .unwrap();
+
+        let index = load_index(root).expect("should load npm-style repo");
+        assert_eq!(index.skills.len(), 2, "should find both skills");
+        assert!(
+            index
+                .skills
+                .contains_key(&("testorg".to_string(), "alpha".to_string())),
+            "alpha skill should be keyed by manifest author"
+        );
+        assert!(
+            index
+                .skills
+                .contains_key(&("testorg".to_string(), "beta".to_string())),
+            "beta skill should be keyed by manifest author"
+        );
+
+        // Verify frontmatter is used for beta
+        let beta = &index.skills[&("testorg".to_string(), "beta".to_string())];
+        let latest = beta.latest().expect("should have latest");
+        assert_eq!(latest.version, "2.0.0");
+        assert_eq!(latest.metadata.skill.description, "Beta from frontmatter");
+    }
+
+    #[test]
+    fn test_load_index_npm_fixture() {
+        let npm_dir = test_npm_registry();
+        if !npm_dir.exists() {
+            return;
+        }
+        let index = load_index(&npm_dir).expect("should load test-npm-registry");
+
+        assert_eq!(index.skills.len(), 3, "should find 3 skills");
+
+        // Check redis-caching with frontmatter
+        let caching = index
+            .skills
+            .get(&("redis".to_string(), "redis-caching".to_string()))
+            .expect("redis-caching should exist");
+        let latest = caching.latest().expect("should have latest");
+        assert_eq!(latest.version, "2.1.0");
+        assert_eq!(
+            latest.metadata.skill.description,
+            "Best practices for Redis caching patterns"
+        );
+        assert!(
+            latest.files.contains_key("rules/cache-patterns.md"),
+            "rules/ files should be loaded"
+        );
+        assert!(
+            latest.files.contains_key("rules/ttl-guidelines.md"),
+            "rules/ files should be loaded"
+        );
+
+        // Check vector-search
+        let vsearch = index
+            .skills
+            .get(&("redis".to_string(), "vector-search".to_string()))
+            .expect("vector-search should exist");
+        let latest = vsearch.latest().expect("should have latest");
+        assert_eq!(latest.version, "1.5.0");
+        assert!(
+            latest.files.contains_key("references/embedding-guide.md"),
+            "references/ files should be loaded"
+        );
+
+        // Check session-management (no frontmatter)
+        let session = index
+            .skills
+            .get(&("redis".to_string(), "session-management".to_string()))
+            .expect("session-management should exist");
+        let latest = session.latest().expect("should have latest");
+        assert_eq!(
+            latest.version, "0.1.0",
+            "no frontmatter means default version"
+        );
+
+        // Category from manifest should be indexed
+        assert!(
+            index.categories.contains_key("database"),
+            "database category from manifest should be indexed: {:?}",
+            index.categories
         );
     }
 }

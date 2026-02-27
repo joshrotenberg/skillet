@@ -12,6 +12,10 @@ fn test_registry() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
 }
 
+fn test_npm_registry() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+}
+
 #[allow(deprecated)] // cargo_bin_cmd! macro has compile-time issues; cargo_bin works fine
 fn skillet() -> Command {
     Command::cargo_bin("skillet").expect("binary exists")
@@ -569,4 +573,57 @@ fn setup_no_official_registry() {
         !content.contains("skillet-registry"),
         "config should NOT contain official registry URL: {content}"
     );
+}
+
+// ── npm-style registry tests ─────────────────────────────────────
+
+#[test]
+fn search_npm_registry() {
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(test_npm_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("redis-caching")
+                .and(predicate::str::contains("vector-search"))
+                .and(predicate::str::contains("session-management")),
+        );
+}
+
+#[test]
+fn search_npm_registry_by_keyword() {
+    skillet()
+        .args(["search", "caching", "--registry"])
+        .arg(test_npm_registry())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("redis-caching"));
+}
+
+#[test]
+fn info_npm_registry_with_frontmatter() {
+    skillet()
+        .args(["info", "redis/redis-caching", "--registry"])
+        .arg(test_npm_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("redis/redis-caching")
+                .and(predicate::str::contains("2.1.0"))
+                .and(predicate::str::contains("caching")),
+        );
+}
+
+#[test]
+fn info_npm_registry_no_frontmatter() {
+    skillet()
+        .args(["info", "redis/session-management", "--registry"])
+        .arg(test_npm_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("redis/session-management")
+                .and(predicate::str::contains("0.1.0")),
+        );
 }
