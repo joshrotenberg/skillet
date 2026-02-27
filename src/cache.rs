@@ -342,7 +342,7 @@ mod tests {
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["commit", "-m", "first"])
+            .args(["-c", "commit.gpgsign=false", "commit", "-m", "first"])
             .current_dir(&git_dir)
             .output()
             .unwrap();
@@ -361,7 +361,7 @@ mod tests {
             .output()
             .unwrap();
         std::process::Command::new("git")
-            .args(["commit", "-m", "second"])
+            .args(["-c", "commit.gpgsign=false", "commit", "-m", "second"])
             .current_dir(&git_dir)
             .output()
             .unwrap();

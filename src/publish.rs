@@ -73,7 +73,10 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
     git_in(&clone_dir, &["add", &format!("{owner}/{name}")])?;
 
     let commit_msg = format!("feat: publish {owner}/{name} v{version}");
-    git_in(&clone_dir, &["commit", "-m", &commit_msg])?;
+    git_in(
+        &clone_dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", &commit_msg],
+    )?;
 
     git_in(&clone_dir, &["push", "-u", "origin", &branch])?;
 

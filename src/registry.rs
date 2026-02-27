@@ -199,7 +199,13 @@ pub fn init_registry(path: &Path, name: &str, description: Option<&str>) -> anyh
     }
 
     let output = std::process::Command::new("git")
-        .args(["commit", "-m", "Initialize skill registry"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Initialize skill registry",
+        ])
         .current_dir(path)
         .output()?;
 
