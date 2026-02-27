@@ -1,8 +1,8 @@
 //! Consolidated error types for the skillet library.
 //!
-//! Covers config, manifest, and install errors. Other modules (validate,
-//! pack, publish, registry, index, integrity) continue to use `anyhow`
-//! and can be migrated in a follow-up.
+//! All library modules use `crate::error::{Error, Result}`. The binary
+//! crate (`main.rs`) and the private `discover::build_local_entry` helper
+//! still use `anyhow` where appropriate.
 
 use std::path::PathBuf;
 
@@ -78,6 +78,46 @@ pub enum Error {
     #[error("failed to resolve current directory: {0}")]
     CurrentDir(std::io::Error),
 
+    // -- Integrity --
+    #[error("invalid manifest line (expected two-space separator): {line}")]
+    ManifestFormatError { line: String },
+    #[error("MANIFEST.sha256 missing composite hash")]
+    ManifestMissingComposite,
+
+    // -- Scaffold --
+    #[error("{0}")]
+    Scaffold(String),
+
+    // -- Git --
+    #[error("git {operation} failed: {stderr}")]
+    Git { operation: String, stderr: String },
+
+    // -- Registry --
+    #[error("invalid duration: {0}")]
+    InvalidDuration(String),
+
+    // -- Validate --
+    #[error("validation error: {0}")]
+    Validation(String),
+
+    // -- Index --
+    #[error("failed to load skill at {path}: {reason}")]
+    SkillLoad { path: PathBuf, reason: String },
+    #[error("failed to parse {path}: {source}")]
+    TomlParse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
+    #[error("failed to read {path}: {source}")]
+    FileRead {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+
+    // -- Publish --
+    #[error("{0}")]
+    Publish(String),
+
     // -- Generic --
     #[error("{context}: {source}")]
     Io {
@@ -86,4 +126,14 @@ pub enum Error {
     },
     #[error("{0}")]
     Other(String),
+}
+
+/// Allow converting `std::io::Error` into `Error` for `?` in simple cases.
+impl From<std::io::Error> for Error {
+    fn from(source: std::io::Error) -> Self {
+        Error::Io {
+            context: "I/O error".to_string(),
+            source,
+        }
+    }
 }
