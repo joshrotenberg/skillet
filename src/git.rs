@@ -84,3 +84,138 @@ pub fn clone_or_pull(url: &str, target: &Path) -> crate::error::Result<()> {
         clone(url, target)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    /// Create a bare git repo and return its temp directory.
+    fn make_bare_repo() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        Command::new("git")
+            .args(["init", "--bare"])
+            .arg(dir.path())
+            .output()
+            .unwrap();
+        dir
+    }
+
+    /// Create a git repo with an initial commit and return its temp directory.
+    fn make_repo_with_commit() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let p = dir.path();
+        Command::new("git").args(["init"]).arg(p).output().unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                &p.display().to_string(),
+                "config",
+                "user.email",
+                "test@test.com",
+            ])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                &p.display().to_string(),
+                "config",
+                "user.name",
+                "Test",
+            ])
+            .output()
+            .unwrap();
+        std::fs::write(p.join("README.md"), "# Test").unwrap();
+        Command::new("git")
+            .args(["-C", &p.display().to_string(), "add", "."])
+            .output()
+            .unwrap();
+        Command::new("git")
+            .args([
+                "-C",
+                &p.display().to_string(),
+                "-c",
+                "commit.gpgsign=false",
+                "commit",
+                "-m",
+                "init",
+            ])
+            .output()
+            .unwrap();
+        dir
+    }
+
+    #[test]
+    fn head_returns_commit_hash() {
+        let repo = make_repo_with_commit();
+        let hash = head(repo.path()).unwrap();
+        assert_eq!(hash.len(), 40);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn head_fails_on_non_repo() {
+        let dir = TempDir::new().unwrap();
+        let result = head(dir.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert!(err.to_string().contains("rev-parse HEAD"));
+    }
+
+    #[test]
+    fn clone_from_local_bare() {
+        let bare = make_bare_repo();
+        let target = TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+        let result = clone(&format!("file://{}", bare.path().display()), &dest);
+        assert!(result.is_ok());
+        assert!(dest.join(".git").exists());
+    }
+
+    #[test]
+    fn clone_fails_with_bad_url() {
+        let target = TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+        let result = clone("file:///nonexistent/repo", &dest);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn pull_on_valid_repo() {
+        let origin = make_repo_with_commit();
+        let target = TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+        clone(&format!("file://{}", origin.path().display()), &dest).unwrap();
+        let result = pull(&dest);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn pull_fails_on_non_repo() {
+        let dir = TempDir::new().unwrap();
+        let result = pull(dir.path());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn clone_or_pull_clones_when_no_git() {
+        let bare = make_bare_repo();
+        let target = TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+        let result = clone_or_pull(&format!("file://{}", bare.path().display()), &dest);
+        assert!(result.is_ok());
+        assert!(dest.join(".git").exists());
+    }
+
+    #[test]
+    fn clone_or_pull_pulls_when_git_exists() {
+        let origin = make_repo_with_commit();
+        let target = TempDir::new().unwrap();
+        let dest = target.path().join("clone");
+        clone(&format!("file://{}", origin.path().display()), &dest).unwrap();
+        let result = clone_or_pull(&format!("file://{}", origin.path().display()), &dest);
+        assert!(result.is_ok());
+    }
+}

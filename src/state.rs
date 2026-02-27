@@ -416,3 +416,389 @@ impl SkillSummary {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper: build a minimal SkillVersion for testing
+    fn make_version(version: &str, description: &str, yanked: bool) -> SkillVersion {
+        SkillVersion {
+            version: version.to_string(),
+            metadata: SkillMetadata {
+                skill: SkillInfo {
+                    name: "test".to_string(),
+                    owner: "owner".to_string(),
+                    version: version.to_string(),
+                    description: description.to_string(),
+                    trigger: None,
+                    license: None,
+                    author: None,
+                    classification: None,
+                    compatibility: None,
+                },
+            },
+            skill_md: "# Test".to_string(),
+            skill_toml_raw: String::new(),
+            yanked,
+            files: HashMap::new(),
+            published: None,
+            has_content: true,
+            content_hash: None,
+            integrity_ok: None,
+        }
+    }
+
+    /// Helper: build a minimal SkillEntry
+    fn make_entry(owner: &str, name: &str, versions: Vec<SkillVersion>) -> SkillEntry {
+        SkillEntry {
+            owner: owner.to_string(),
+            name: name.to_string(),
+            registry_path: None,
+            versions,
+            source: SkillSource::Registry,
+        }
+    }
+
+    // -- SkillEntry::latest() --
+
+    #[test]
+    fn latest_returns_last_non_yanked() {
+        let entry = make_entry(
+            "acme",
+            "tool",
+            vec![
+                make_version("0.1.0", "first", false),
+                make_version("0.2.0", "second", false),
+                make_version("0.3.0", "third", false),
+            ],
+        );
+        let latest = entry.latest().unwrap();
+        assert_eq!(latest.version, "0.3.0");
+    }
+
+    #[test]
+    fn latest_skips_yanked() {
+        let entry = make_entry(
+            "acme",
+            "tool",
+            vec![
+                make_version("0.1.0", "first", false),
+                make_version("0.2.0", "second", true),
+            ],
+        );
+        let latest = entry.latest().unwrap();
+        assert_eq!(latest.version, "0.1.0");
+    }
+
+    #[test]
+    fn latest_returns_none_when_all_yanked() {
+        let entry = make_entry(
+            "acme",
+            "tool",
+            vec![
+                make_version("0.1.0", "first", true),
+                make_version("0.2.0", "second", true),
+            ],
+        );
+        assert!(entry.latest().is_none());
+    }
+
+    #[test]
+    fn latest_returns_none_for_empty_versions() {
+        let entry = make_entry("acme", "tool", vec![]);
+        assert!(entry.latest().is_none());
+    }
+
+    // -- SkillIndex::merge() --
+
+    #[test]
+    fn merge_first_registry_wins() {
+        let mut primary = SkillIndex::default();
+        primary.skills.insert(
+            ("acme".into(), "tool".into()),
+            make_entry(
+                "acme",
+                "tool",
+                vec![make_version("1.0.0", "primary", false)],
+            ),
+        );
+
+        let mut secondary = SkillIndex::default();
+        secondary.skills.insert(
+            ("acme".into(), "tool".into()),
+            make_entry(
+                "acme",
+                "tool",
+                vec![make_version("2.0.0", "secondary", false)],
+            ),
+        );
+
+        primary.merge(secondary);
+
+        assert_eq!(primary.skills.len(), 1);
+        let entry = primary.skills.get(&("acme".into(), "tool".into())).unwrap();
+        assert_eq!(entry.latest().unwrap().version, "1.0.0");
+    }
+
+    #[test]
+    fn merge_adds_new_skills() {
+        let mut primary = SkillIndex::default();
+        primary.skills.insert(
+            ("acme".into(), "tool-a".into()),
+            make_entry(
+                "acme",
+                "tool-a",
+                vec![make_version("1.0.0", "first", false)],
+            ),
+        );
+
+        let mut secondary = SkillIndex::default();
+        secondary.skills.insert(
+            ("acme".into(), "tool-b".into()),
+            make_entry(
+                "acme",
+                "tool-b",
+                vec![make_version("1.0.0", "second", false)],
+            ),
+        );
+
+        primary.merge(secondary);
+
+        assert_eq!(primary.skills.len(), 2);
+        assert!(
+            primary
+                .skills
+                .contains_key(&("acme".into(), "tool-b".into()))
+        );
+    }
+
+    #[test]
+    fn merge_updates_category_counts() {
+        let mut primary = SkillIndex::default();
+
+        let mut version = make_version("1.0.0", "categorized", false);
+        version.metadata.skill.classification = Some(Classification {
+            categories: vec!["database".into(), "caching".into()],
+            tags: vec![],
+        });
+
+        let mut secondary = SkillIndex::default();
+        secondary.skills.insert(
+            ("acme".into(), "redis".into()),
+            make_entry("acme", "redis", vec![version]),
+        );
+
+        primary.merge(secondary);
+
+        assert_eq!(primary.categories.get("database"), Some(&1));
+        assert_eq!(primary.categories.get("caching"), Some(&1));
+    }
+
+    #[test]
+    fn merge_accumulates_categories_across_skills() {
+        let mut primary = SkillIndex::default();
+
+        let mut v1 = make_version("1.0.0", "first db", false);
+        v1.metadata.skill.classification = Some(Classification {
+            categories: vec!["database".into()],
+            tags: vec![],
+        });
+        primary.skills.insert(
+            ("acme".into(), "pg".into()),
+            make_entry("acme", "pg", vec![v1]),
+        );
+        *primary.categories.entry("database".into()).or_insert(0) += 1;
+
+        let mut v2 = make_version("1.0.0", "second db", false);
+        v2.metadata.skill.classification = Some(Classification {
+            categories: vec!["database".into()],
+            tags: vec![],
+        });
+        let mut secondary = SkillIndex::default();
+        secondary.skills.insert(
+            ("acme".into(), "redis".into()),
+            make_entry("acme", "redis", vec![v2]),
+        );
+
+        primary.merge(secondary);
+
+        assert_eq!(primary.categories.get("database"), Some(&2));
+    }
+
+    // -- SkillSource --
+
+    #[test]
+    fn source_registry_label_is_none() {
+        assert!(SkillSource::Registry.label().is_none());
+    }
+
+    #[test]
+    fn source_local_label() {
+        let source = SkillSource::Local {
+            platform: "claude".into(),
+            path: PathBuf::from("/tmp/skills/test"),
+        };
+        assert_eq!(source.label(), Some("local (claude)".into()));
+    }
+
+    #[test]
+    fn source_embedded_label() {
+        let source = SkillSource::Embedded {
+            project: "my-tool".into(),
+            path: PathBuf::from("/tmp/project/.skillet/test"),
+        };
+        assert_eq!(source.label(), Some("embedded (my-tool)".into()));
+    }
+
+    #[test]
+    fn source_registry_path_is_none() {
+        assert!(SkillSource::Registry.path().is_none());
+    }
+
+    #[test]
+    fn source_local_path() {
+        let p = PathBuf::from("/tmp/skills/test");
+        let source = SkillSource::Local {
+            platform: "claude".into(),
+            path: p.clone(),
+        };
+        assert_eq!(source.path(), Some(p.as_path()));
+    }
+
+    #[test]
+    fn source_embedded_path() {
+        let p = PathBuf::from("/tmp/project/.skillet/test");
+        let source = SkillSource::Embedded {
+            project: "my-tool".into(),
+            path: p.clone(),
+        };
+        assert_eq!(source.path(), Some(p.as_path()));
+    }
+
+    // -- SkillSummary::from_entry() --
+
+    #[test]
+    fn summary_from_entry_basic() {
+        let entry = make_entry(
+            "acme",
+            "tool",
+            vec![make_version("1.0.0", "A great tool", false)],
+        );
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.owner, "acme");
+        assert_eq!(summary.name, "tool");
+        assert_eq!(summary.version, "1.0.0");
+        assert_eq!(summary.description, "A great tool");
+        assert_eq!(summary.version_count, 1);
+        assert_eq!(summary.available_versions, vec!["1.0.0"]);
+        assert!(summary.categories.is_empty());
+        assert!(summary.tags.is_empty());
+        assert!(summary.source_label.is_none());
+    }
+
+    #[test]
+    fn summary_from_entry_with_classification() {
+        let mut version = make_version("2.0.0", "classified", false);
+        version.metadata.skill.classification = Some(Classification {
+            categories: vec!["database".into()],
+            tags: vec!["redis".into(), "caching".into()],
+        });
+        let entry = make_entry("acme", "redis", vec![version]);
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.categories, vec!["database"]);
+        assert_eq!(summary.tags, vec!["redis", "caching"]);
+    }
+
+    #[test]
+    fn summary_from_entry_files_sorted() {
+        let mut version = make_version("1.0.0", "with files", false);
+        version.files.insert(
+            "scripts/lint.sh".into(),
+            SkillFile {
+                content: "#!/bin/bash".into(),
+                mime_type: "text/x-shellscript".into(),
+            },
+        );
+        version.files.insert(
+            "references/guide.md".into(),
+            SkillFile {
+                content: "# Guide".into(),
+                mime_type: "text/markdown".into(),
+            },
+        );
+        let entry = make_entry("acme", "tool", vec![version]);
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(
+            summary.files,
+            vec!["references/guide.md", "scripts/lint.sh"]
+        );
+    }
+
+    #[test]
+    fn summary_from_entry_yanked_excluded_from_available() {
+        let entry = make_entry(
+            "acme",
+            "tool",
+            vec![
+                make_version("0.1.0", "old", false),
+                make_version("0.2.0", "yanked", true),
+                make_version("0.3.0", "latest", false),
+            ],
+        );
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.version, "0.3.0");
+        assert_eq!(summary.version_count, 3);
+        assert_eq!(summary.available_versions, vec!["0.1.0", "0.3.0"]);
+    }
+
+    #[test]
+    fn summary_from_entry_none_when_all_yanked() {
+        let entry = make_entry("acme", "tool", vec![make_version("0.1.0", "yanked", true)]);
+        assert!(SkillSummary::from_entry(&entry).is_none());
+    }
+
+    #[test]
+    fn summary_integrity_verified() {
+        let mut version = make_version("1.0.0", "verified", false);
+        version.integrity_ok = Some(true);
+        let entry = make_entry("acme", "tool", vec![version]);
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.integrity, Some("verified".into()));
+    }
+
+    #[test]
+    fn summary_integrity_failed() {
+        let mut version = make_version("1.0.0", "bad", false);
+        version.integrity_ok = Some(false);
+        let entry = make_entry("acme", "tool", vec![version]);
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.integrity, Some("failed".into()));
+    }
+
+    #[test]
+    fn summary_source_label_for_local() {
+        let mut entry = make_entry(
+            "acme",
+            "tool",
+            vec![make_version("1.0.0", "local skill", false)],
+        );
+        entry.source = SkillSource::Local {
+            platform: "claude".into(),
+            path: PathBuf::from("/tmp/skills/tool"),
+        };
+        let summary = SkillSummary::from_entry(&entry).unwrap();
+        assert_eq!(summary.source_label, Some("local (claude)".into()));
+    }
+
+    // -- RegistryConfig default --
+
+    #[test]
+    fn registry_config_default() {
+        let config = RegistryConfig::default();
+        assert_eq!(config.registry.name, "skillet");
+        assert_eq!(config.registry.version, 1);
+        assert!(config.registry.description.is_none());
+        assert!(config.registry.maintainer.is_none());
+    }
+}

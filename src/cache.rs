@@ -6,7 +6,7 @@
 //! to JSON) and reconstructs the full `SkillIndex` on load.
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
@@ -36,9 +36,8 @@ struct CachedIndex {
     categories: BTreeMap<String, usize>,
 }
 
-/// Compute the cache file path for a registry source.
-fn cache_path(source: &RegistrySource) -> PathBuf {
-    let base = cache_dir();
+/// Compute the cache file path relative to a given base directory.
+fn cache_path_in(source: &RegistrySource, base: &Path) -> PathBuf {
     match source {
         RegistrySource::Local(path) => {
             let hex = short_hash(&path.to_string_lossy());
@@ -69,7 +68,12 @@ fn cache_path(source: &RegistrySource) -> PathBuf {
 /// Returns `None` on any failure (missing, corrupt, expired, version
 /// mismatch, HEAD mismatch). Cache reads are best-effort.
 pub fn load(source: &RegistrySource, ttl: Duration) -> Option<SkillIndex> {
-    let path = cache_path(source);
+    load_in(source, ttl, &cache_dir())
+}
+
+/// Load a cached index using a specific cache base directory.
+fn load_in(source: &RegistrySource, ttl: Duration, base: &Path) -> Option<SkillIndex> {
+    let path = cache_path_in(source, base);
     let data = std::fs::read_to_string(&path).ok()?;
     let cached: CachedIndex = serde_json::from_str(&data).ok()?;
 
@@ -128,7 +132,12 @@ pub fn load(source: &RegistrySource, ttl: Duration) -> Option<SkillIndex> {
 /// Logs warnings on failure but does not propagate errors -- cache
 /// writes are best-effort.
 pub fn write(source: &RegistrySource, index: &SkillIndex) {
-    let path = cache_path(source);
+    write_in(source, index, &cache_dir());
+}
+
+/// Write a cached index using a specific cache base directory.
+fn write_in(source: &RegistrySource, index: &SkillIndex, base: &Path) {
+    let path = cache_path_in(source, base);
 
     if let Some(parent) = path.parent()
         && let Err(e) = std::fs::create_dir_all(parent)
@@ -185,7 +194,12 @@ pub fn clear() -> crate::error::Result<()> {
 }
 
 /// The index cache directory: `~/.cache/skillet/index/`.
+///
+/// Respects `SKILLET_CACHE_DIR` override for testing isolation.
 fn cache_dir() -> PathBuf {
+    if let Ok(dir) = std::env::var("SKILLET_CACHE_DIR") {
+        return PathBuf::from(dir);
+    }
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home)
             .join(".cache")
@@ -210,7 +224,6 @@ mod tests {
     use super::*;
     use crate::state::{SkillEntry, SkillFile, SkillMetadata, SkillVersion};
     use std::collections::HashMap;
-    use std::path::Path;
 
     /// Build a minimal SkillIndex for testing.
     fn test_index() -> SkillIndex {
@@ -259,12 +272,12 @@ mod tests {
     #[test]
     fn test_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
-        // Override cache dir by writing directly to a known path
+        let cache_base = tempfile::tempdir().unwrap();
         let index = test_index();
         let source = temp_source(tmp.path());
 
-        write(&source, &index);
-        let loaded = load(&source, Duration::from_secs(300)).unwrap();
+        write_in(&source, &index, cache_base.path());
+        let loaded = load_in(&source, Duration::from_secs(300), cache_base.path()).unwrap();
 
         assert_eq!(loaded.skills.len(), 1);
         let key = ("test-owner".to_string(), "test-skill".to_string());
@@ -279,45 +292,46 @@ mod tests {
     #[test]
     fn test_version_mismatch() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
         let index = test_index();
 
-        // Write a valid cache
-        write(&source, &index);
+        write_in(&source, &index, cache_base.path());
 
         // Tamper with the version
-        let path = cache_path(&source);
+        let path = cache_path_in(&source, cache_base.path());
         let mut cached: CachedIndex =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         cached.version = 999;
         std::fs::write(&path, serde_json::to_string(&cached).unwrap()).unwrap();
 
-        assert!(load(&source, Duration::from_secs(300)).is_none());
+        assert!(load_in(&source, Duration::from_secs(300), cache_base.path()).is_none());
     }
 
     #[test]
     fn test_expired_ttl() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
         let index = test_index();
 
-        // Write a valid cache
-        write(&source, &index);
+        write_in(&source, &index, cache_base.path());
 
         // Set cached_at to the past
-        let path = cache_path(&source);
+        let path = cache_path_in(&source, cache_base.path());
         let mut cached: CachedIndex =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         cached.cached_at = 0; // epoch = very old
         std::fs::write(&path, serde_json::to_string(&cached).unwrap()).unwrap();
 
         // With a short TTL, should be expired
-        assert!(load(&source, Duration::from_secs(1)).is_none());
+        assert!(load_in(&source, Duration::from_secs(1), cache_base.path()).is_none());
     }
 
     #[test]
     fn test_head_mismatch() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let git_dir = tmp.path().join("repo");
 
         // Create a real git repo so git::head works
@@ -352,7 +366,7 @@ mod tests {
         let index = test_index();
 
         // Write cache (captures current HEAD)
-        write(&source, &index);
+        write_in(&source, &index, cache_base.path());
 
         // Make a new commit so HEAD changes
         std::fs::write(git_dir.join("file.txt"), "b").unwrap();
@@ -368,19 +382,20 @@ mod tests {
             .unwrap();
 
         // Cache should be invalidated by HEAD mismatch
-        assert!(load(&source, Duration::from_secs(300)).is_none());
+        assert!(load_in(&source, Duration::from_secs(300), cache_base.path()).is_none());
     }
 
     #[test]
     fn test_cache_hit_fresh() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
         let index = test_index();
 
-        write(&source, &index);
+        write_in(&source, &index, cache_base.path());
 
         // Should hit: fresh cache, no git HEAD to check
-        let loaded = load(&source, Duration::from_secs(300));
+        let loaded = load_in(&source, Duration::from_secs(300), cache_base.path());
         assert!(loaded.is_some());
     }
 
@@ -398,43 +413,47 @@ mod tests {
     #[test]
     fn test_missing_cache_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let nonexistent = tmp.path().join("nonexistent");
         let source = temp_source(&nonexistent);
-        assert!(load(&source, Duration::from_secs(300)).is_none());
+        assert!(load_in(&source, Duration::from_secs(300), cache_base.path()).is_none());
     }
 
     #[test]
     fn test_corrupt_cache_returns_none() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
 
         // Write garbage to the cache path
-        let path = cache_path(&source);
+        let path = cache_path_in(&source, cache_base.path());
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).unwrap();
         }
         std::fs::write(&path, "not json").unwrap();
 
-        assert!(load(&source, Duration::from_secs(300)).is_none());
+        assert!(load_in(&source, Duration::from_secs(300), cache_base.path()).is_none());
     }
 
     #[test]
     fn test_zero_ttl_always_revalidates() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
         let index = test_index();
 
-        write(&source, &index);
+        write_in(&source, &index, cache_base.path());
 
         // TTL=0 means always revalidate; no git so no HEAD check,
         // but the TTL check is skipped for Duration::ZERO
-        let loaded = load(&source, Duration::ZERO);
+        let loaded = load_in(&source, Duration::ZERO, cache_base.path());
         assert!(loaded.is_some());
     }
 
     #[test]
     fn test_skill_files_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
+        let cache_base = tempfile::tempdir().unwrap();
         let source = temp_source(tmp.path());
 
         let mut files = HashMap::new();
@@ -482,8 +501,8 @@ mod tests {
             .skills
             .insert(("owner".to_string(), "with-files".to_string()), entry);
 
-        write(&source, &index);
-        let loaded = load(&source, Duration::from_secs(300)).unwrap();
+        write_in(&source, &index, cache_base.path());
+        let loaded = load_in(&source, Duration::from_secs(300), cache_base.path()).unwrap();
 
         let key = ("owner".to_string(), "with-files".to_string());
         let loaded_entry = loaded.skills.get(&key).unwrap();
