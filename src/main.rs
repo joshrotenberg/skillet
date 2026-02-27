@@ -2019,6 +2019,10 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
 
     if let Some(addr) = args.http {
         tracing::info!(addr = %addr, "Serving over HTTP");
+        // SECURITY: Origin validation is disabled to allow connections from any
+        // origin. The HTTP transport is intended for local development and trusted
+        // networks. In production, place behind a reverse proxy with proper
+        // authentication and CORS configuration.
         HttpTransport::new(router)
             .disable_origin_validation()
             .serve(&addr)
