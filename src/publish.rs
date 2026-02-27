@@ -3,8 +3,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use anyhow::{Context, bail};
-
+use crate::error::Error;
 use crate::pack::{self, PackResult};
 
 /// Result of publishing a skillpack.
@@ -18,7 +17,7 @@ pub struct PublishResult {
 ///
 /// `repo` is in `owner/repo` format (e.g. "joshrotenberg/skillet-registry").
 /// If `dry_run` is true, stops after packing and prints what would happen.
-pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishResult> {
+pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> crate::error::Result<PublishResult> {
     let pack_result = pack::pack(dir)?;
 
     let owner = &pack_result.validation.owner;
@@ -41,7 +40,10 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
     check_gh_cli()?;
 
     // Fork + clone the registry repo
-    let tmpdir = tempfile::tempdir().context("Failed to create temp directory")?;
+    let tmpdir = tempfile::tempdir().map_err(|e| Error::Io {
+        context: "failed to create temp directory".to_string(),
+        source: e,
+    })?;
     let clone_dir = tmpdir.path().join("registry");
 
     gh(&[
@@ -56,7 +58,7 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
         // Fork may already exist; try cloning directly
         gh(&["repo", "clone", repo, &clone_dir.display().to_string()])
     })
-    .context("Failed to fork/clone registry repo")?;
+    .map_err(|_| Error::Publish(format!("failed to fork/clone registry repo {repo}")))?;
 
     // Create a publish branch
     let branch = format!("publish/{owner}/{name}/{version}");
@@ -64,8 +66,10 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
 
     // Copy the packed skillpack into the registry checkout
     let dest = clone_dir.join(owner).join(name);
-    std::fs::create_dir_all(&dest)
-        .with_context(|| format!("Failed to create {}", dest.display()))?;
+    std::fs::create_dir_all(&dest).map_err(|e| Error::CreateDir {
+        path: dest.clone(),
+        source: e,
+    })?;
 
     copy_skillpack(dir, &dest)?;
 
@@ -73,7 +77,10 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
     git_in(&clone_dir, &["add", &format!("{owner}/{name}")])?;
 
     let commit_msg = format!("feat: publish {owner}/{name} v{version}");
-    git_in(&clone_dir, &["commit", "-m", &commit_msg])?;
+    git_in(
+        &clone_dir,
+        &["-c", "commit.gpgsign=false", "commit", "-m", &commit_msg],
+    )?;
 
     git_in(&clone_dir, &["push", "-u", "origin", &branch])?;
 
@@ -103,19 +110,24 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> anyhow::Result<PublishR
 }
 
 /// Copy skill files from source to destination directory.
-fn copy_skillpack(src: &Path, dst: &Path) -> anyhow::Result<()> {
+fn copy_skillpack(src: &Path, dst: &Path) -> crate::error::Result<()> {
     let required = ["skill.toml", "SKILL.md", "MANIFEST.sha256"];
     for name in &required {
         let from = src.join(name);
         let to = dst.join(name);
-        std::fs::copy(&from, &to).with_context(|| format!("Failed to copy {}", from.display()))?;
+        std::fs::copy(&from, &to).map_err(|e| Error::Io {
+            context: format!("failed to copy {}", from.display()),
+            source: e,
+        })?;
     }
 
     // versions.toml
     let versions_src = src.join("versions.toml");
     if versions_src.is_file() {
-        std::fs::copy(&versions_src, dst.join("versions.toml"))
-            .context("Failed to copy versions.toml")?;
+        std::fs::copy(&versions_src, dst.join("versions.toml")).map_err(|e| Error::Io {
+            context: "failed to copy versions.toml".to_string(),
+            source: e,
+        })?;
     }
 
     // Extra directories: scripts/, references/, assets/
@@ -129,27 +141,36 @@ fn copy_skillpack(src: &Path, dst: &Path) -> anyhow::Result<()> {
     // README.md (optional)
     let readme_src = src.join("README.md");
     if readme_src.is_file() {
-        std::fs::copy(&readme_src, dst.join("README.md")).context("Failed to copy README.md")?;
+        std::fs::copy(&readme_src, dst.join("README.md")).map_err(|e| Error::Io {
+            context: "failed to copy README.md".to_string(),
+            source: e,
+        })?;
     }
 
     Ok(())
 }
 
 /// Recursively copy a directory.
-fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
-    std::fs::create_dir_all(dst).with_context(|| format!("Failed to create {}", dst.display()))?;
+fn copy_dir_recursive(src: &Path, dst: &Path) -> crate::error::Result<()> {
+    std::fs::create_dir_all(dst).map_err(|e| Error::CreateDir {
+        path: dst.to_path_buf(),
+        source: e,
+    })?;
 
-    for entry in
-        std::fs::read_dir(src).with_context(|| format!("Failed to read {}", src.display()))?
-    {
+    for entry in std::fs::read_dir(src).map_err(|e| Error::FileRead {
+        path: src.to_path_buf(),
+        source: e,
+    })? {
         let entry = entry?;
         let src_path = entry.path();
         let dst_path = dst.join(entry.file_name());
         if src_path.is_dir() {
             copy_dir_recursive(&src_path, &dst_path)?;
         } else {
-            std::fs::copy(&src_path, &dst_path)
-                .with_context(|| format!("Failed to copy {}", src_path.display()))?;
+            std::fs::copy(&src_path, &dst_path).map_err(|e| Error::Io {
+                context: format!("failed to copy {}", src_path.display()),
+                source: e,
+            })?;
         }
     }
 
@@ -157,7 +178,7 @@ fn copy_dir_recursive(src: &Path, dst: &Path) -> anyhow::Result<()> {
 }
 
 /// Check that `gh` CLI is available and authenticated.
-fn check_gh_cli() -> anyhow::Result<()> {
+fn check_gh_cli() -> crate::error::Result<()> {
     let status = Command::new("gh")
         .args(["auth", "status"])
         .stdout(std::process::Stdio::null())
@@ -166,53 +187,77 @@ fn check_gh_cli() -> anyhow::Result<()> {
 
     match status {
         Ok(s) if s.success() => Ok(()),
-        Ok(_) => bail!("gh CLI is not authenticated. Run `gh auth login` first."),
-        Err(_) => bail!("gh CLI not found. Install it from https://cli.github.com/"),
+        Ok(_) => Err(Error::Publish(
+            "gh CLI is not authenticated. Run `gh auth login` first.".to_string(),
+        )),
+        Err(_) => Err(Error::Publish(
+            "gh CLI not found. Install it from https://cli.github.com/".to_string(),
+        )),
     }
 }
 
 /// Run a `gh` command and return stdout.
-fn gh(args: &[&str]) -> anyhow::Result<String> {
+fn gh(args: &[&str]) -> crate::error::Result<String> {
     let output = Command::new("gh")
         .args(args)
         .output()
-        .context("Failed to run gh")?;
+        .map_err(|e| Error::Io {
+            context: "failed to run gh".to_string(),
+            source: e,
+        })?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("gh {} failed: {}", args.first().unwrap_or(&""), stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Publish(format!(
+            "gh {} failed: {}",
+            args.first().unwrap_or(&""),
+            stderr
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Run a `gh` command in a specific directory.
-fn gh_in(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
+fn gh_in(dir: &Path, args: &[&str]) -> crate::error::Result<String> {
     let output = Command::new("gh")
         .args(args)
         .current_dir(dir)
         .output()
-        .context("Failed to run gh")?;
+        .map_err(|e| Error::Io {
+            context: "failed to run gh".to_string(),
+            source: e,
+        })?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("gh {} failed: {}", args.first().unwrap_or(&""), stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Publish(format!(
+            "gh {} failed: {}",
+            args.first().unwrap_or(&""),
+            stderr
+        )));
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
 /// Run a `git` command in a specific directory.
-fn git_in(dir: &Path, args: &[&str]) -> anyhow::Result<String> {
+fn git_in(dir: &Path, args: &[&str]) -> crate::error::Result<String> {
     let output = Command::new("git")
         .args(args)
         .current_dir(dir)
         .output()
-        .context("Failed to run git")?;
+        .map_err(|e| Error::Io {
+            context: "failed to run git".to_string(),
+            source: e,
+        })?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        bail!("git {} failed: {}", args.first().unwrap_or(&""), stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: args.first().unwrap_or(&"").to_string(),
+            stderr,
+        });
     }
 
     Ok(String::from_utf8_lossy(&output.stdout).to_string())

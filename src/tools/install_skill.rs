@@ -95,7 +95,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     "unknown".to_string()
                 };
 
-                // Trust checking (warn-only in MCP path, never blocks)
+                // Trust checking
                 let content_hash = integrity::sha256_hex(&version.skill_md);
                 let cli_config = config::load_config().unwrap_or_default();
                 let trust_state = trust::load().unwrap_or_default();
@@ -106,6 +106,24 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     &input.name,
                     &content_hash,
                 );
+
+                // Block if require_trusted is set and skill is unknown
+                if cli_config.trust.require_trusted && trust_check.tier == trust::TrustTier::Unknown
+                {
+                    return Ok(CallToolResult::error(format!(
+                        "Install blocked: require_trusted is set in config.\n\n\
+                         {}\n\n\
+                         To install this skill, either:\n\
+                         1. Trust the registry: `skillet trust add-registry {}`\n\
+                         2. Review and pin: `skillet info {}/{}`, then `skillet trust pin {}/{}`",
+                        trust_check.reason,
+                        registry_id,
+                        input.owner,
+                        input.name,
+                        input.owner,
+                        input.name,
+                    )));
+                }
 
                 // Load manifest
                 let mut installed_manifest = match manifest::load() {

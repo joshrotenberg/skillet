@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crate::cache::{self, RegistrySource};
 use crate::config::SkilletConfig;
+use crate::error::Error;
 use crate::state::SkillIndex;
 use crate::{git, index};
 
@@ -12,7 +13,7 @@ use crate::{git, index};
 pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet-registry.git";
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
-pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
+pub fn parse_duration(s: &str) -> crate::error::Result<Duration> {
     let s = s.trim();
     if s == "0" {
         return Ok(Duration::ZERO);
@@ -21,13 +22,17 @@ pub fn parse_duration(s: &str) -> anyhow::Result<Duration> {
     let (num, suffix) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
     let num: u64 = num
         .parse()
-        .map_err(|_| anyhow::anyhow!("Invalid duration number: {s}"))?;
+        .map_err(|_| Error::InvalidDuration(format!("invalid number: {s}")))?;
 
     let secs = match suffix {
         "s" | "" => num,
         "m" => num * 60,
         "h" => num * 3600,
-        _ => anyhow::bail!("Unknown duration suffix: {suffix} (use s, m, or h)"),
+        _ => {
+            return Err(Error::InvalidDuration(format!(
+                "unknown suffix: {suffix} (use s, m, or h)"
+            )));
+        }
     };
 
     Ok(Duration::from_secs(secs))
@@ -71,7 +76,11 @@ pub fn default_cache_dir() -> PathBuf {
 /// then makes an initial commit. If `description` is provided, it is
 /// included in `config.toml`. Maintainer info is auto-populated from
 /// the user's git config when available.
-pub fn init_registry(path: &Path, name: &str, description: Option<&str>) -> anyhow::Result<()> {
+pub fn init_registry(
+    path: &Path,
+    name: &str,
+    description: Option<&str>,
+) -> crate::error::Result<()> {
     std::fs::create_dir_all(path)?;
 
     // config.toml
@@ -165,8 +174,11 @@ pub fn init_registry(path: &Path, name: &str, description: Option<&str>) -> anyh
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git init failed: {stderr}");
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "init".to_string(),
+            stderr,
+        });
     }
 
     // Set local git config if no global identity exists (e.g. in CI)
@@ -194,18 +206,30 @@ pub fn init_registry(path: &Path, name: &str, description: Option<&str>) -> anyh
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git add failed: {stderr}");
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "add".to_string(),
+            stderr,
+        });
     }
 
     let output = std::process::Command::new("git")
-        .args(["commit", "-m", "Initialize skill registry"])
+        .args([
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "Initialize skill registry",
+        ])
         .current_dir(path)
         .output()?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        anyhow::bail!("git commit failed: {stderr}");
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "commit".to_string(),
+            stderr,
+        });
     }
 
     Ok(())
@@ -224,7 +248,7 @@ pub fn load_registries(
     remote_flags: &[String],
     config: &SkilletConfig,
     subdir: Option<&Path>,
-) -> anyhow::Result<(SkillIndex, Vec<PathBuf>)> {
+) -> crate::error::Result<(SkillIndex, Vec<PathBuf>)> {
     let has_flags = !registry_flags.is_empty() || !remote_flags.is_empty();
 
     let (local_paths, remote_urls): (Vec<PathBuf>, Vec<&str>) = if has_flags {

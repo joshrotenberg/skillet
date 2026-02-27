@@ -2,9 +2,8 @@
 
 use std::path::Path;
 
-use anyhow::Context;
-
 use crate::config;
+use crate::error::Error;
 use crate::integrity;
 use crate::state::{VersionRecord, VersionsManifest};
 use crate::validate::{self, ValidationResult};
@@ -22,14 +21,16 @@ pub struct PackResult {
 /// Fails if validation fails. Idempotent: re-running on an already-packed
 /// directory with the same version is a no-op for versions.toml and
 /// overwrites MANIFEST.sha256 with identical content.
-pub fn pack(dir: &Path) -> anyhow::Result<PackResult> {
+pub fn pack(dir: &Path) -> crate::error::Result<PackResult> {
     let validation = validate::validate_skillpack(dir)?;
 
     // Generate and write MANIFEST.sha256
     let manifest_content = integrity::format_manifest(&validation.hashes);
     let manifest_path = dir.join("MANIFEST.sha256");
-    std::fs::write(&manifest_path, &manifest_content)
-        .with_context(|| format!("Failed to write {}", manifest_path.display()))?;
+    std::fs::write(&manifest_path, &manifest_content).map_err(|e| Error::WriteFile {
+        path: manifest_path.clone(),
+        source: e,
+    })?;
 
     // Update versions.toml
     let versions_updated = update_versions_toml(dir, &validation)?;
@@ -46,16 +47,21 @@ pub fn pack(dir: &Path) -> anyhow::Result<PackResult> {
 /// If versions.toml exists, appends the current version if not already listed.
 /// If it doesn't exist, creates it with a single entry. Returns true if the
 /// file was modified.
-fn update_versions_toml(dir: &Path, validation: &ValidationResult) -> anyhow::Result<bool> {
+fn update_versions_toml(dir: &Path, validation: &ValidationResult) -> crate::error::Result<bool> {
     let versions_path = dir.join("versions.toml");
     let version = &validation.version;
     let now = now_iso8601();
 
     if versions_path.is_file() {
-        let raw = std::fs::read_to_string(&versions_path)
-            .with_context(|| format!("Failed to read {}", versions_path.display()))?;
-        let mut manifest: VersionsManifest = toml::from_str(&raw)
-            .with_context(|| format!("Failed to parse {}", versions_path.display()))?;
+        let raw = std::fs::read_to_string(&versions_path).map_err(|e| Error::FileRead {
+            path: versions_path.clone(),
+            source: e,
+        })?;
+        let mut manifest: VersionsManifest =
+            toml::from_str(&raw).map_err(|e| Error::TomlParse {
+                path: versions_path.clone(),
+                source: e,
+            })?;
 
         // Check if this version is already listed
         if manifest.versions.iter().any(|v| v.version == *version) {
@@ -68,10 +74,11 @@ fn update_versions_toml(dir: &Path, validation: &ValidationResult) -> anyhow::Re
             yanked: false,
         });
 
-        let content =
-            toml::to_string_pretty(&manifest).context("Failed to serialize versions.toml")?;
-        std::fs::write(&versions_path, content)
-            .with_context(|| format!("Failed to write {}", versions_path.display()))?;
+        let content = toml::to_string_pretty(&manifest).map_err(Error::ManifestSerialize)?;
+        std::fs::write(&versions_path, content).map_err(|e| Error::WriteFile {
+            path: versions_path.clone(),
+            source: e,
+        })?;
     } else {
         let manifest = VersionsManifest {
             versions: vec![VersionRecord {
@@ -81,10 +88,11 @@ fn update_versions_toml(dir: &Path, validation: &ValidationResult) -> anyhow::Re
             }],
         };
 
-        let content =
-            toml::to_string_pretty(&manifest).context("Failed to serialize versions.toml")?;
-        std::fs::write(&versions_path, content)
-            .with_context(|| format!("Failed to write {}", versions_path.display()))?;
+        let content = toml::to_string_pretty(&manifest).map_err(Error::ManifestSerialize)?;
+        std::fs::write(&versions_path, content).map_err(|e| Error::WriteFile {
+            path: versions_path.clone(),
+            source: e,
+        })?;
     }
 
     Ok(true)

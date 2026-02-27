@@ -398,6 +398,11 @@ fetch content via resource templates.
 | `--tools <list>` | Explicit tool allowlist (comma-separated) |
 | `--resources <list>` | Explicit resource allowlist (comma-separated) |
 
+**HTTP transport note**: `--http` disables origin validation to allow
+connections from any origin. It is intended for local development and
+trusted networks. In production, place behind a reverse proxy with
+authentication and CORS configuration.
+
 ## Configuration
 
 Skillet reads `~/.config/skillet/config.toml` for defaults. Run
@@ -420,8 +425,9 @@ ttl = "5m"              # index cache time-to-live
 suppress = []           # rule IDs to suppress
 
 [trust]
-unknown_policy = "warn" # "warn", "prompt", or "block"
-auto_pin = true         # pin content hash on install
+unknown_policy = "warn"   # "warn", "prompt", or "block"
+auto_pin = true           # pin content hash on install
+require_trusted = false   # block installs from unknown sources
 
 [server]
 tools = []              # empty = expose all
