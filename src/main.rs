@@ -182,6 +182,11 @@ struct PublishArgs {
     #[arg(long)]
     repo: String,
 
+    /// Override the destination path in the registry (e.g. "acme/lang/java/maven-build").
+    /// If not set, defaults to `owner/name/`.
+    #[arg(long)]
+    registry_path: Option<String>,
+
     /// Validate and show what would happen without creating a PR
     #[arg(long)]
     dry_run: bool,
@@ -1626,6 +1631,7 @@ mod tests {
             SkillEntry {
                 owner: "local".to_string(),
                 name: "my-local-skill".to_string(),
+                registry_path: None,
                 versions: vec![SkillVersion {
                     version: "0.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -1732,6 +1738,7 @@ mod tests {
             SkillEntry {
                 owner: "testowner".to_string(),
                 name: "yanked-skill".to_string(),
+                registry_path: None,
                 versions: vec![SkillVersion {
                     version: "1.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -1805,6 +1812,7 @@ mod tests {
             SkillEntry {
                 owner: "testowner".to_string(),
                 name: "yanked-skill".to_string(),
+                registry_path: None,
                 versions: vec![SkillVersion {
                     version: "1.0.0".to_string(),
                     metadata: SkillMetadata {

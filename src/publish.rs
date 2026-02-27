@@ -16,19 +16,30 @@ pub struct PublishResult {
 /// Pack the skill and open a PR against the registry repo.
 ///
 /// `repo` is in `owner/repo` format (e.g. "joshrotenberg/skillet-registry").
+/// `registry_path` overrides the destination path in the registry. If `None`,
+/// the default `owner/name/` layout is used.
 /// If `dry_run` is true, stops after packing and prints what would happen.
-pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> crate::error::Result<PublishResult> {
+pub fn publish(
+    dir: &Path,
+    repo: &str,
+    registry_path: Option<&str>,
+    dry_run: bool,
+) -> crate::error::Result<PublishResult> {
     let pack_result = pack::pack(dir)?;
 
     let owner = &pack_result.validation.owner;
     let name = &pack_result.validation.name;
     let version = &pack_result.validation.version;
 
+    let dest_rel = registry_path
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| format!("{owner}/{name}"));
+
     if dry_run {
         println!("\nDry run: would publish {owner}/{name} v{version} to {repo}");
         println!("  - Fork {repo} (or use existing fork)");
         println!("  - Create branch: publish/{owner}/{name}/{version}");
-        println!("  - Copy skillpack into {owner}/{name}/");
+        println!("  - Copy skillpack into {dest_rel}/");
         println!("  - Open PR against {repo}");
         return Ok(PublishResult {
             pack: pack_result,
@@ -65,7 +76,7 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> crate::error::Result<Pu
     git_in(&clone_dir, &["checkout", "-b", &branch])?;
 
     // Copy the packed skillpack into the registry checkout
-    let dest = clone_dir.join(owner).join(name);
+    let dest = clone_dir.join(&dest_rel);
     std::fs::create_dir_all(&dest).map_err(|e| Error::CreateDir {
         path: dest.clone(),
         source: e,
@@ -74,7 +85,7 @@ pub fn publish(dir: &Path, repo: &str, dry_run: bool) -> crate::error::Result<Pu
     copy_skillpack(dir, &dest)?;
 
     // Stage, commit, push
-    git_in(&clone_dir, &["add", &format!("{owner}/{name}")])?;
+    git_in(&clone_dir, &["add", &dest_rel])?;
 
     let commit_msg = format!("feat: publish {owner}/{name} v{version}");
     git_in(

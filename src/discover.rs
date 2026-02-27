@@ -123,6 +123,7 @@ fn build_local_entry(name: &str, path: &Path, platform: &str) -> anyhow::Result<
     Ok(SkillEntry {
         owner: "local".to_string(),
         name: name.to_string(),
+        registry_path: None,
         source: SkillSource::Local {
             platform: platform.to_string(),
             path: path.to_path_buf(),

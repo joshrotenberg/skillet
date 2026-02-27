@@ -204,6 +204,10 @@ impl SkillSource {
 pub struct SkillEntry {
     pub owner: String,
     pub name: String,
+    /// Relative path from registry root (e.g., "acme/lang/java/maven-build").
+    /// None for flat skills at the standard `owner/name/` depth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub registry_path: Option<String>,
     pub versions: Vec<SkillVersion>,
     #[serde(default)]
     pub source: SkillSource,

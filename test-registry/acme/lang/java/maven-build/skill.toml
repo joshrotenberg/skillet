@@ -1,0 +1,9 @@
+[skill]
+name = "maven-build"
+owner = "acme"
+version = "1.0.0"
+description = "Maven build conventions and best practices for Java projects"
+
+[skill.classification]
+categories = ["java", "build-tools"]
+tags = ["maven", "java", "build"]
