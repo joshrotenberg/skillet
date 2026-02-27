@@ -627,3 +627,531 @@ fn info_npm_registry_no_frontmatter() {
                 .and(predicate::str::contains("0.1.0")),
         );
 }
+
+// ── CLI hygiene (#141) ──────────────────────────────────────────────
+
+#[test]
+fn version_flag() {
+    skillet()
+        .args(["--version"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skillet"));
+}
+
+#[test]
+fn help_flag() {
+    skillet().args(["--help"]).assert().success().stdout(
+        predicate::str::contains("MCP-native skill registry")
+            .and(predicate::str::contains("Commands:"))
+            .and(predicate::str::contains("search"))
+            .and(predicate::str::contains("install")),
+    );
+}
+
+#[test]
+fn help_subcommand_search() {
+    skillet()
+        .args(["search", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Search for skills").and(predicate::str::contains("QUERY")),
+        );
+}
+
+#[test]
+fn help_subcommand_install() {
+    skillet()
+        .args(["install", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Install a skill").and(predicate::str::contains("SKILL")));
+}
+
+#[test]
+fn help_subcommand_validate() {
+    skillet()
+        .args(["validate", "--help"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validate a skillpack"));
+}
+
+#[test]
+fn help_subcommand_trust() {
+    skillet()
+        .args(["trust", "--help"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("add-registry")
+                .and(predicate::str::contains("pin"))
+                .and(predicate::str::contains("list")),
+        );
+}
+
+#[test]
+fn search_missing_query() {
+    skillet()
+        .args(["search", "--registry"])
+        .arg(test_registry())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("QUERY").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn install_missing_skill_arg() {
+    skillet()
+        .args(["install", "--registry"])
+        .arg(test_registry())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("SKILL").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn info_missing_skill_arg() {
+    skillet()
+        .args(["info", "--registry"])
+        .arg(test_registry())
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("SKILL").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn init_skill_missing_path() {
+    skillet()
+        .args(["init-skill"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("PATH").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn invalid_subcommand() {
+    skillet()
+        .args(["nonexistent-subcommand"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("unrecognized").or(predicate::str::contains("invalid")));
+}
+
+// ── Publish CLI (#139) ──────────────────────────────────────────────
+
+#[test]
+fn publish_missing_repo_flag() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let skill_path = tmp.path().join("myowner/my-skill");
+
+    // Scaffold a skill
+    skillet()
+        .args(["init-skill"])
+        .arg(&skill_path)
+        .assert()
+        .success();
+
+    // Publish without --repo should fail
+    skillet()
+        .args(["publish"])
+        .arg(&skill_path)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--repo").or(predicate::str::contains("required")));
+}
+
+#[test]
+fn publish_invalid_path() {
+    skillet()
+        .args([
+            "publish",
+            "/tmp/nonexistent-skill-xyzzy",
+            "--repo",
+            "owner/repo",
+        ])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("error").or(predicate::str::contains("failed")));
+}
+
+#[test]
+fn publish_fails_without_skill_toml() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    // Directory with only SKILL.md (no skill.toml -> pack will fail)
+    std::fs::write(tmp.path().join("SKILL.md"), "# Test Skill\n\nDo the thing.").unwrap();
+
+    skillet()
+        .args(["publish"])
+        .arg(tmp.path())
+        .args(["--repo", "owner/repo"])
+        .assert()
+        .failure()
+        .stderr(
+            predicate::str::contains("failed")
+                .or(predicate::str::contains("error"))
+                .or(predicate::str::contains("skill.toml")),
+        );
+}
+
+#[test]
+fn publish_dry_run() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let skill_path = tmp.path().join("testowner/test-skill");
+
+    // Scaffold a skill
+    skillet()
+        .args(["init-skill"])
+        .arg(&skill_path)
+        .assert()
+        .success();
+
+    // Dry run should succeed without gh CLI
+    skillet()
+        .args(["publish"])
+        .arg(&skill_path)
+        .args(["--repo", "owner/test-repo", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Dry run")
+                .and(predicate::str::contains("testowner/test-skill"))
+                .and(predicate::str::contains("owner/test-repo")),
+        );
+}
+
+#[test]
+fn publish_dry_run_unsafe_exits_2() {
+    // Copy unsafe-demo to a temp dir
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let src = test_registry().join("acme/unsafe-demo");
+    let dst = tmp.path().join("acme/unsafe-demo");
+    std::fs::create_dir_all(&dst).expect("create dirs");
+    for entry in std::fs::read_dir(&src).expect("read src") {
+        let entry = entry.expect("dir entry");
+        if entry.file_type().expect("file type").is_file() {
+            std::fs::copy(entry.path(), dst.join(entry.file_name())).expect("copy");
+        }
+    }
+
+    skillet()
+        .args(["publish"])
+        .arg(&dst)
+        .args(["--repo", "owner/repo", "--dry-run"])
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("safety issues detected"));
+}
+
+// ── Audit / Trust CLI (#140) ────────────────────────────────────────
+
+#[test]
+fn audit_no_installed_skills() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["audit"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No installed skills"));
+}
+
+#[test]
+fn audit_after_install() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Install a skill
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Audit should show the installed skill
+    skillet()
+        .args(["audit"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("joshrotenberg/rust-dev"));
+}
+
+#[test]
+fn audit_detects_tampered_skill() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Install a skill
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Tamper with the installed SKILL.md
+    let skill_md = tmp.path().join(".agents/skills/rust-dev/SKILL.md");
+    std::fs::write(&skill_md, "# TAMPERED CONTENT").expect("tamper with skill");
+
+    // Audit should detect the modification
+    skillet()
+        .args(["audit"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .failure()
+        .stdout(predicate::str::contains("MODIFIED"));
+}
+
+#[test]
+fn trust_add_and_list_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Add a trusted registry
+    skillet()
+        .args(["trust", "add-registry", "https://example.com/registry.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Trusted"));
+
+    // List should show it
+    skillet()
+        .args(["trust", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("https://example.com/registry.git"));
+}
+
+#[test]
+fn trust_add_registry_with_note() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args([
+            "trust",
+            "add-registry",
+            "https://example.com/repo.git",
+            "--note",
+            "Official registry",
+        ])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Trusted"));
+
+    // List should show the note
+    skillet()
+        .args(["trust", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("https://example.com/repo.git")
+                .and(predicate::str::contains("Official registry")),
+        );
+}
+
+#[test]
+fn trust_add_registry_idempotent() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Add twice
+    skillet()
+        .args(["trust", "add-registry", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["trust", "add-registry", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("already trusted"));
+}
+
+#[test]
+fn trust_remove_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Add then remove
+    skillet()
+        .args(["trust", "add-registry", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["trust", "remove-registry", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed"));
+
+    // List should be empty
+    skillet()
+        .args(["trust", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No trusted registries"));
+}
+
+#[test]
+fn trust_remove_nonexistent_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args([
+            "trust",
+            "remove-registry",
+            "https://example.com/nonexistent.git",
+        ])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn trust_list_empty() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["trust", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No trusted registries"));
+}
+
+#[test]
+fn trust_pin_skill() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Pinned"));
+
+    // List should show the pinned skill
+    skillet()
+        .args(["trust", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("joshrotenberg/rust-dev"));
+}
+
+#[test]
+fn trust_pin_nonexistent_skill() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["trust", "pin", "nonexistent/skill-xyzzy", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn trust_unpin_skill() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Pin first
+    skillet()
+        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    // Unpin
+    skillet()
+        .args(["trust", "unpin", "joshrotenberg/rust-dev"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Unpinned"));
+}
+
+#[test]
+fn trust_unpin_not_pinned() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["trust", "unpin", "nonexistent/skill"])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not pinned"));
+}
+
+#[test]
+fn trust_list_registries_only() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Add a registry and pin a skill
+    skillet()
+        .args(["trust", "add-registry", "https://example.com/repo.git"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    // List with --registries-only should show registry but not pinned skill details
+    skillet()
+        .args(["trust", "list", "--registries-only"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("https://example.com/repo.git"));
+}
