@@ -71,6 +71,10 @@ pub struct TrustConfig {
     pub unknown_policy: String,
     /// Automatically pin content hash on install.
     pub auto_pin: bool,
+    /// Require trusted registry or pinned hash for installs.
+    /// When true, blocks installs from unknown sources.
+    #[serde(default)]
+    pub require_trusted: bool,
 }
 
 impl Default for TrustConfig {
@@ -78,6 +82,7 @@ impl Default for TrustConfig {
         Self {
             unknown_policy: "warn".to_string(),
             auto_pin: true,
+            require_trusted: false,
         }
     }
 }

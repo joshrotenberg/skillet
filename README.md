@@ -420,8 +420,9 @@ ttl = "5m"              # index cache time-to-live
 suppress = []           # rule IDs to suppress
 
 [trust]
-unknown_policy = "warn" # "warn", "prompt", or "block"
-auto_pin = true         # pin content hash on install
+unknown_policy = "warn"   # "warn", "prompt", or "block"
+auto_pin = true           # pin content hash on install
+require_trusted = false   # block installs from unknown sources
 
 [server]
 tools = []              # empty = expose all
