@@ -232,6 +232,10 @@ struct InstallArgs {
     #[arg(long)]
     version: Option<String>,
 
+    /// Require trusted registry or pinned hash (blocks unknown sources)
+    #[arg(long)]
+    require_trusted: bool,
+
     #[command(flatten)]
     registries: RegistryArgs,
 }
@@ -844,13 +848,37 @@ fn run_install(args: InstallArgs) -> ExitCode {
             }
         }
         trust::TrustTier::Unknown => {
+            // --require-trusted flag or config overrides policy
+            if args.require_trusted || cli_config.trust.require_trusted {
+                eprintln!(
+                    "Error: {reason}\n\n\
+                     Install blocked: --require-trusted is set.\n\
+                     To install this skill, either:\n\
+                     \n  1. Trust the registry:\n\
+                     \n     skillet trust add-registry {registry_id}\n\
+                     \n  2. Review and pin the skill:\n\
+                     \n     skillet info {owner}/{name}\n\
+                     \n     skillet trust pin {owner}/{name}\n\
+                     \n     skillet install {owner}/{name}\n",
+                    reason = trust_check.reason,
+                );
+                return ExitCode::from(1);
+            }
+
             let policy = &cli_config.trust.unknown_policy;
             match policy.as_str() {
                 "block" => {
                     eprintln!(
-                        "Error: {}\nInstall blocked by trust policy (unknown_policy = \"block\").\n\
-                         Trust this registry with: skillet trust add-registry {registry_id}",
-                        trust_check.reason
+                        "Error: {reason}\n\n\
+                         Install blocked by trust policy (unknown_policy = \"block\").\n\
+                         To install this skill, either:\n\
+                         \n  1. Trust the registry:\n\
+                         \n     skillet trust add-registry {registry_id}\n\
+                         \n  2. Review and pin the skill:\n\
+                         \n     skillet info {owner}/{name}\n\
+                         \n     skillet trust pin {owner}/{name}\n\
+                         \n     skillet install {owner}/{name}\n",
+                        reason = trust_check.reason,
                     );
                     return ExitCode::from(1);
                 }
@@ -868,8 +896,14 @@ fn run_install(args: InstallArgs) -> ExitCode {
                     }
                 }
                 _ => {
-                    // "warn" (default)
-                    eprintln!("Warning: {}", trust_check.reason);
+                    // "warn" (default) -- explicit guidance
+                    eprintln!(
+                        "Warning: {reason}\n\
+                         To verify before installing:\n\
+                         \n  skillet info {owner}/{name}\n\
+                         \n  skillet trust pin {owner}/{name}\n",
+                        reason = trust_check.reason,
+                    );
                 }
             }
         }
