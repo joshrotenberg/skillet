@@ -1,0 +1,9 @@
+[skill]
+name = "gradle-build"
+owner = "acme"
+version = "1.0.0"
+description = "Gradle build conventions and best practices for Java projects"
+
+[skill.classification]
+categories = ["java", "build-tools"]
+tags = ["gradle", "java", "build"]

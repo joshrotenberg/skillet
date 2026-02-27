@@ -171,7 +171,12 @@ pub(crate) fn run_publish(args: PublishArgs) -> ExitCode {
     let path = &args.path;
     println!("Publishing {} to {} ...\n", path.display(), args.repo);
 
-    let result = match publish::publish(path, &args.repo, args.dry_run) {
+    let result = match publish::publish(
+        path,
+        &args.repo,
+        args.registry_path.as_deref(),
+        args.dry_run,
+    ) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("  error: {e}");

@@ -296,6 +296,11 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         println!("  versions .............. {}", available.join(", "));
     }
 
+    // Registry path for nested skills
+    if let Some(ref rpath) = entry.registry_path {
+        println!("  registry path ......... {rpath}");
+    }
+
     ExitCode::SUCCESS
 }
 

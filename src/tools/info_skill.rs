@@ -139,6 +139,11 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     output.push_str(&format!("**Versions:** {}\n", available.join(", ")));
                 }
 
+                // Registry path for nested skills
+                if let Some(ref rpath) = entry.registry_path {
+                    output.push_str(&format!("**Registry path:** {rpath}\n"));
+                }
+
                 // Source label for local skills
                 if let Some(label) = entry.source.label() {
                     output.push_str(&format!("**Source:** {label}\n"));

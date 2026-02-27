@@ -497,6 +497,73 @@ fn scenario_reinstall_overwrites() {
     );
 }
 
+// ── Nested registry skills ───────────────────────────────────────────
+
+/// search -> info -> install -> list with nested registry structure
+#[test]
+fn scenario_nested_registry_skills() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Step 1: Search should find nested skills
+    let search_output = skillet()
+        .args(["search", "maven", "--registry"])
+        .arg(test_registry())
+        .output()
+        .expect("search");
+    let search_stdout = String::from_utf8_lossy(&search_output.stdout);
+    assert!(
+        search_stdout.contains("acme/maven-build"),
+        "search should find nested maven-build: {search_stdout}"
+    );
+
+    // Step 2: Info on the nested skill should show registry path
+    skillet()
+        .args(["info", "acme/maven-build", "--registry"])
+        .arg(test_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("version")
+                .and(predicate::str::contains("description"))
+                .and(predicate::str::contains("registry path"))
+                .and(predicate::str::contains("acme/lang/java/maven-build")),
+        );
+
+    // Step 3: Install the nested skill
+    skillet()
+        .args(["install", "acme/maven-build", "--registry"])
+        .arg(test_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed acme/maven-build"));
+
+    // Step 4: List shows it
+    skillet()
+        .args(["list"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("acme/maven-build"));
+
+    // Step 5: Verify installed content matches source
+    let installed_md =
+        std::fs::read_to_string(tmp.path().join(".agents/skills/maven-build/SKILL.md"))
+            .expect("read installed SKILL.md");
+    let registry_md =
+        std::fs::read_to_string(test_registry().join("acme/lang/java/maven-build/SKILL.md"))
+            .expect("read registry SKILL.md");
+    assert_eq!(
+        installed_md, registry_md,
+        "installed SKILL.md should match registry content"
+    );
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────
 
 fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, description: &str) {

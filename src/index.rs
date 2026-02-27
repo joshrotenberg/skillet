@@ -1,11 +1,12 @@
 //! Index loading from a local registry directory
 //!
-//! Walks the registry directory tree looking for `owner/skill-name/skill.toml`
-//! files. Each skill directory is expected to contain:
-//! - `skill.toml` (required)
-//! - `SKILL.md` (required)
+//! Walks the registry directory tree looking for skill directories containing
+//! `skill.toml`. Supports both flat (`owner/skill-name/`) and nested
+//! (`owner/group/subgroup/skill-name/`) layouts. Intermediate directories
+//! without `skill.toml` are recursed into up to `MAX_NESTING_DEPTH` levels
+//! below the owner.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::integrity;
@@ -14,6 +15,10 @@ use crate::state::{
     VersionsManifest,
 };
 use crate::validate;
+
+/// Maximum directory depth below an owner to search for skill directories.
+/// Prevents runaway recursion on malformed registry trees.
+const MAX_NESTING_DEPTH: usize = 5;
 
 /// Load registry configuration from `config.toml` at the registry root.
 ///
@@ -41,19 +46,25 @@ pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig>
 
 /// Load a skill index from a registry directory.
 ///
-/// The directory structure is:
+/// Supports both flat and nested layouts:
 /// ```text
 /// registry/
 ///   owner1/
-///     skill-a/
+///     skill-a/          # flat: owner1/skill-a/
 ///       skill.toml
 ///       SKILL.md
-///     skill-b/
-///       skill.toml
-///       SKILL.md
+///     lang/
+///       java/
+///         maven-build/  # nested: owner1/lang/java/maven-build/
+///           skill.toml
+///           SKILL.md
 ///   owner2/
 ///     ...
 /// ```
+///
+/// Intermediate directories (without `skill.toml`) are recursed into up to
+/// `MAX_NESTING_DEPTH` levels. If two nested paths under the same owner
+/// produce the same skill name, the first one wins and a warning is logged.
 pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     let mut index = SkillIndex::default();
 
@@ -83,27 +94,54 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
             continue;
         }
 
-        // Iterate over skill directories within this owner
-        let mut skills: Vec<_> = std::fs::read_dir(owner_entry.path())
-            .map_err(|e| Error::FileRead {
-                path: owner_entry.path(),
-                source: e,
-            })?
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().is_dir())
-            .collect();
-        skills.sort_by_key(|e| e.file_name());
+        // Recursively find all skill directories under this owner
+        let skill_dirs = find_skill_dirs(&owner_entry.path(), MAX_NESTING_DEPTH);
 
-        for skill_entry in skills {
-            let skill_dir = skill_entry.path();
-            let skill_name = skill_entry.file_name().to_string_lossy().to_string();
+        for skill_dir in skill_dirs {
+            // Compute the relative path from the owner directory
+            let rel_from_owner = skill_dir
+                .strip_prefix(owner_entry.path())
+                .unwrap_or(&skill_dir);
+            let skill_name = skill_dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string();
 
-            if skill_name.starts_with('.') {
-                continue;
-            }
+            // Determine registry_path: None for flat (depth 1), Some for nested
+            let depth = rel_from_owner.components().count();
+            let registry_path_value = if depth > 1 {
+                // Full path from registry root: owner/group/.../skill-name
+                let full_rel = registry_path.join(&owner_name).join(rel_from_owner);
+                // Use forward slashes for portability
+                Some(
+                    full_rel
+                        .strip_prefix(registry_path)
+                        .unwrap_or(&full_rel)
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                )
+            } else {
+                None
+            };
 
             match load_skill(&owner_name, &skill_name, &skill_dir) {
-                Ok(entry) => {
+                Ok(mut entry) => {
+                    // Check for collision: same (owner, name) from a different path
+                    let key = (owner_name.clone(), skill_name.clone());
+                    if let Some(existing) = index.skills.get(&key) {
+                        tracing::warn!(
+                            owner = %owner_name,
+                            name = %skill_name,
+                            existing_path = ?existing.registry_path,
+                            new_path = ?registry_path_value,
+                            "Duplicate skill name under same owner, keeping first"
+                        );
+                        continue;
+                    }
+
+                    entry.registry_path = registry_path_value;
+
                     // Update category counts
                     if let Some(v) = entry.latest()
                         && let Some(ref c) = v.metadata.skill.classification
@@ -112,7 +150,7 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
                             *index.categories.entry(cat.clone()).or_insert(0) += 1;
                         }
                     }
-                    index.skills.insert((owner_name.clone(), skill_name), entry);
+                    index.skills.insert(key, entry);
                 }
                 Err(e) => {
                     tracing::warn!(
@@ -133,6 +171,50 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     );
 
     Ok(index)
+}
+
+/// Recursively find skill directories (those containing `skill.toml`).
+///
+/// Walks `dir` looking for subdirectories that contain `skill.toml`.
+/// If a directory has `skill.toml`, it is collected and not recursed further.
+/// If it doesn't and `remaining_depth > 0`, recurse into it.
+/// Hidden directories (starting with `.`) are always skipped.
+fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
+    let mut result = Vec::new();
+
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return result,
+    };
+
+    let mut subdirs: Vec<_> = entries
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .collect();
+    subdirs.sort_by_key(|e| e.file_name());
+
+    for entry in subdirs {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+
+        let path = entry.path();
+        if path.join("skill.toml").is_file() {
+            // This is a skill directory -- collect it, don't recurse further
+            result.push(path);
+        } else if remaining_depth > 0 {
+            // Intermediate grouping directory -- recurse
+            result.extend(find_skill_dirs(&path, remaining_depth - 1));
+        } else {
+            tracing::debug!(
+                path = %path.display(),
+                "Skipping directory: max nesting depth reached"
+            );
+        }
+    }
+
+    result
 }
 
 /// Load a single skill from its directory.
@@ -192,6 +274,7 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
     Ok(SkillEntry {
         owner: owner.to_string(),
         name: name.to_string(),
+        registry_path: None,
         versions,
         source: SkillSource::default(),
     })
@@ -790,6 +873,7 @@ description = "Just a description, nothing else new"
         let entry = SkillEntry {
             owner: "test".to_string(),
             name: "test".to_string(),
+            registry_path: None,
             source: SkillSource::default(),
             versions: vec![
                 SkillVersion {
@@ -901,5 +985,223 @@ description = "Just a description, nothing else new"
         let latest = entry.latest().expect("should have latest");
         assert!(latest.content_hash.is_some());
         assert_eq!(latest.integrity_ok, None);
+    }
+
+    // ── Nested skill discovery tests ─────────────────────────────────
+
+    #[test]
+    fn test_nested_skill_discovery() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // Nested skills should be found
+        assert!(
+            index
+                .skills
+                .contains_key(&("acme".to_string(), "maven-build".to_string())),
+            "nested maven-build should be discovered"
+        );
+        assert!(
+            index
+                .skills
+                .contains_key(&("acme".to_string(), "gradle-build".to_string())),
+            "nested gradle-build should be discovered"
+        );
+
+        // Flat skills should still work
+        assert!(
+            index
+                .skills
+                .contains_key(&("acme".to_string(), "python-dev".to_string())),
+            "flat python-dev should still be discovered"
+        );
+    }
+
+    #[test]
+    fn test_nested_skill_categories_indexed() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // Categories from nested skills should be in the index
+        assert!(
+            index.categories.contains_key("java"),
+            "java category from nested skills should be indexed: {:?}",
+            index.categories
+        );
+        assert!(
+            index.categories.contains_key("build-tools"),
+            "build-tools category from nested skills should be indexed: {:?}",
+            index.categories
+        );
+    }
+
+    #[test]
+    fn test_nested_registry_path_set() {
+        let test_dir = test_registry();
+        if !test_dir.exists() {
+            return;
+        }
+        let index = load_index(&test_dir).expect("Failed to load test index");
+
+        // Nested skills should have registry_path set
+        let maven = index
+            .skills
+            .get(&("acme".to_string(), "maven-build".to_string()))
+            .expect("maven-build should exist");
+        assert_eq!(
+            maven.registry_path.as_deref(),
+            Some("acme/lang/java/maven-build"),
+            "nested skill should have registry_path set"
+        );
+
+        // Flat skills should have registry_path = None
+        let python = index
+            .skills
+            .get(&("acme".to_string(), "python-dev".to_string()))
+            .expect("python-dev should exist");
+        assert_eq!(
+            python.registry_path, None,
+            "flat skill should have no registry_path"
+        );
+    }
+
+    #[test]
+    fn test_nested_skill_discovery_tempdir() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path();
+
+        // Create a flat skill
+        let flat_dir = reg.join("myowner").join("flat-skill");
+        std::fs::create_dir_all(&flat_dir).unwrap();
+        std::fs::write(
+            flat_dir.join("skill.toml"),
+            "[skill]\nname = \"flat-skill\"\nowner = \"myowner\"\nversion = \"1.0.0\"\ndescription = \"A flat skill\"\n",
+        ).unwrap();
+        std::fs::write(flat_dir.join("SKILL.md"), "# Flat\n\nFlat skill.\n").unwrap();
+
+        // Create a nested skill
+        let nested_dir = reg.join("myowner").join("group").join("nested-skill");
+        std::fs::create_dir_all(&nested_dir).unwrap();
+        std::fs::write(
+            nested_dir.join("skill.toml"),
+            "[skill]\nname = \"nested-skill\"\nowner = \"myowner\"\nversion = \"1.0.0\"\ndescription = \"A nested skill\"\n",
+        ).unwrap();
+        std::fs::write(nested_dir.join("SKILL.md"), "# Nested\n\nNested skill.\n").unwrap();
+
+        let index = load_index(reg).expect("Failed to load index");
+
+        assert_eq!(index.skills.len(), 2);
+        assert!(
+            index
+                .skills
+                .contains_key(&("myowner".to_string(), "flat-skill".to_string()))
+        );
+        assert!(
+            index
+                .skills
+                .contains_key(&("myowner".to_string(), "nested-skill".to_string()))
+        );
+
+        // Flat has no registry_path
+        let flat = &index.skills[&("myowner".to_string(), "flat-skill".to_string())];
+        assert_eq!(flat.registry_path, None);
+
+        // Nested has registry_path
+        let nested = &index.skills[&("myowner".to_string(), "nested-skill".to_string())];
+        assert_eq!(
+            nested.registry_path.as_deref(),
+            Some("myowner/group/nested-skill")
+        );
+    }
+
+    #[test]
+    fn test_max_nesting_depth_respected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path();
+
+        // Create a skill at exactly MAX_NESTING_DEPTH levels below owner
+        let mut deep_path = reg.join("owner");
+        for i in 0..MAX_NESTING_DEPTH {
+            deep_path = deep_path.join(format!("level{i}"));
+        }
+        deep_path = deep_path.join("deep-skill");
+        std::fs::create_dir_all(&deep_path).unwrap();
+        std::fs::write(
+            deep_path.join("skill.toml"),
+            "[skill]\nname = \"deep-skill\"\nowner = \"owner\"\nversion = \"1.0.0\"\ndescription = \"Deep skill\"\n",
+        ).unwrap();
+        std::fs::write(deep_path.join("SKILL.md"), "# Deep\n").unwrap();
+
+        // Create a skill one level too deep (should NOT be found)
+        let mut too_deep = reg.join("owner");
+        for i in 0..=MAX_NESTING_DEPTH {
+            too_deep = too_deep.join(format!("d{i}"));
+        }
+        too_deep = too_deep.join("too-deep");
+        std::fs::create_dir_all(&too_deep).unwrap();
+        std::fs::write(
+            too_deep.join("skill.toml"),
+            "[skill]\nname = \"too-deep\"\nowner = \"owner\"\nversion = \"1.0.0\"\ndescription = \"Too deep\"\n",
+        ).unwrap();
+        std::fs::write(too_deep.join("SKILL.md"), "# Too Deep\n").unwrap();
+
+        let index = load_index(reg).expect("Failed to load index");
+
+        assert!(
+            index
+                .skills
+                .contains_key(&("owner".to_string(), "deep-skill".to_string())),
+            "skill at max depth should be found"
+        );
+        assert!(
+            !index
+                .skills
+                .contains_key(&("owner".to_string(), "too-deep".to_string())),
+            "skill beyond max depth should not be found"
+        );
+    }
+
+    #[test]
+    fn test_nested_collision_detected() {
+        let tmp = tempfile::tempdir().unwrap();
+        let reg = tmp.path();
+
+        // Two paths under the same owner, both producing name = "collider"
+        let path_a = reg.join("owner").join("a").join("collider");
+        std::fs::create_dir_all(&path_a).unwrap();
+        std::fs::write(
+            path_a.join("skill.toml"),
+            "[skill]\nname = \"collider\"\nowner = \"owner\"\nversion = \"1.0.0\"\ndescription = \"First collider\"\n",
+        ).unwrap();
+        std::fs::write(path_a.join("SKILL.md"), "# First\n\nFirst collider.\n").unwrap();
+
+        let path_b = reg.join("owner").join("b").join("collider");
+        std::fs::create_dir_all(&path_b).unwrap();
+        std::fs::write(
+            path_b.join("skill.toml"),
+            "[skill]\nname = \"collider\"\nowner = \"owner\"\nversion = \"2.0.0\"\ndescription = \"Second collider\"\n",
+        ).unwrap();
+        std::fs::write(path_b.join("SKILL.md"), "# Second\n\nSecond collider.\n").unwrap();
+
+        let index = load_index(reg).expect("Failed to load index");
+
+        // Only one should be present (first-wins based on sorted directory order)
+        let entry = index
+            .skills
+            .get(&("owner".to_string(), "collider".to_string()))
+            .expect("collider should exist");
+
+        // "a" sorts before "b", so first collider should win
+        let latest = entry.latest().expect("should have latest");
+        assert_eq!(
+            latest.metadata.skill.description, "First collider",
+            "first collision path (a/) should win"
+        );
     }
 }

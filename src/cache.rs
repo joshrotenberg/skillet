@@ -217,6 +217,7 @@ mod tests {
         let entry = SkillEntry {
             owner: "test-owner".to_string(),
             name: "test-skill".to_string(),
+            registry_path: None,
             source: Default::default(),
             versions: vec![SkillVersion {
                 version: "0.1.0".to_string(),
@@ -448,6 +449,7 @@ mod tests {
         let entry = SkillEntry {
             owner: "owner".to_string(),
             name: "with-files".to_string(),
+            registry_path: None,
             source: Default::default(),
             versions: vec![SkillVersion {
                 version: "1.0.0".to_string(),
