@@ -398,6 +398,11 @@ fetch content via resource templates.
 | `--tools <list>` | Explicit tool allowlist (comma-separated) |
 | `--resources <list>` | Explicit resource allowlist (comma-separated) |
 
+**HTTP transport note**: `--http` disables origin validation to allow
+connections from any origin. It is intended for local development and
+trusted networks. In production, place behind a reverse proxy with
+authentication and CORS configuration.
+
 ## Configuration
 
 Skillet reads `~/.config/skillet/config.toml` for defaults. Run
