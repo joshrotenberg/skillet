@@ -494,10 +494,7 @@ mod tests {
         let base = PathBuf::from("/tmp/skillet");
         let dir = cache_dir_for_url(&base, "git@github.com:owner/repo.git");
         // SSH URLs use ":" not "/", so rsplit('/') gets "git@github.com:owner_repo"
-        assert_eq!(
-            dir,
-            PathBuf::from("/tmp/skillet/git@github.com:owner_repo")
-        );
+        assert_eq!(dir, PathBuf::from("/tmp/skillet/git@github.com:owner_repo"));
     }
 
     #[test]
