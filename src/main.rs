@@ -29,6 +29,7 @@ use skillet_mcp::{
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
+#[command(version)]
 #[command(about = "MCP-native skill registry for AI agents")]
 #[command(args_conflicts_with_subcommands = true)]
 struct Cli {
