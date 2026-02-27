@@ -190,6 +190,107 @@ mod tests {
         assert!(!result2.versions_updated);
     }
 
+    #[test]
+    fn test_pack_with_extra_files() {
+        let src = test_registry().join("joshrotenberg/security-audit");
+        if !src.exists() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        copy_dir(&src, tmp.path());
+        let _ = std::fs::remove_file(tmp.path().join("MANIFEST.sha256"));
+        let _ = std::fs::remove_file(tmp.path().join("versions.toml"));
+
+        let result = pack(tmp.path()).expect("pack should succeed");
+        assert!(result.manifest_written);
+
+        // MANIFEST.sha256 should list all files
+        let manifest_content = std::fs::read_to_string(tmp.path().join("MANIFEST.sha256")).unwrap();
+        assert!(manifest_content.contains("SKILL.md"));
+    }
+
+    #[test]
+    fn test_pack_fails_missing_skill_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("SKILL.md"), "# Test").unwrap();
+        // No skill.toml
+
+        let result = pack(tmp.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("skill.toml"));
+    }
+
+    #[test]
+    fn test_pack_fails_missing_skill_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("skill.toml"),
+            "[skill]\nname = \"test\"\nowner = \"owner\"\nversion = \"1.0.0\"\ndescription = \"A test\"",
+        )
+        .unwrap();
+        // No SKILL.md
+
+        let result = pack(tmp.path());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("SKILL.md"));
+    }
+
+    #[test]
+    fn test_pack_preserves_existing_versions() {
+        let src = test_registry().join("joshrotenberg/rust-dev");
+        if !src.exists() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        copy_dir(&src, tmp.path());
+
+        // Read the existing versions.toml
+        let versions_path = tmp.path().join("versions.toml");
+        let original_raw = std::fs::read_to_string(&versions_path).unwrap_or_default();
+        let original: Option<VersionsManifest> = toml::from_str(&original_raw).ok();
+
+        let result = pack(tmp.path()).expect("pack should succeed");
+
+        if let Some(orig) = original {
+            let updated_raw = std::fs::read_to_string(&versions_path).unwrap();
+            let updated: VersionsManifest = toml::from_str(&updated_raw).unwrap();
+            // Original versions are preserved
+            for orig_v in &orig.versions {
+                assert!(
+                    updated.versions.iter().any(|v| v.version == orig_v.version),
+                    "version {} should be preserved",
+                    orig_v.version
+                );
+            }
+            // If the current version was already listed, count is unchanged
+            if !result.versions_updated {
+                assert_eq!(updated.versions.len(), orig.versions.len());
+            }
+        }
+    }
+
+    #[test]
+    fn test_pack_manifest_hashes_correct() {
+        let src = test_registry().join("skillet/setup");
+        if !src.exists() {
+            return;
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        copy_dir(&src, tmp.path());
+        let _ = std::fs::remove_file(tmp.path().join("MANIFEST.sha256"));
+
+        pack(tmp.path()).expect("pack should succeed");
+
+        // Re-validate to check manifest integrity
+        let result = validate::validate_skillpack(tmp.path()).expect("should validate");
+        assert_eq!(result.manifest_ok, Some(true));
+    }
+
     /// Copy a directory recursively (test helper).
     fn copy_dir(src: &std::path::Path, dst: &std::path::Path) {
         for entry in std::fs::read_dir(src).unwrap() {

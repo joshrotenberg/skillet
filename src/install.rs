@@ -318,4 +318,125 @@ mod tests {
         assert_eq!(entry.version, "1.0.0");
         assert_eq!(entry.checksum, checksum);
     }
+
+    #[test]
+    fn test_install_with_rules_and_templates() {
+        let mut version = sample_version();
+        version.files.insert(
+            "rules/cache-patterns.md".to_string(),
+            SkillFile {
+                content: "# Cache Patterns".to_string(),
+                mime_type: "text/markdown".to_string(),
+            },
+        );
+        version.files.insert(
+            "templates/config.toml".to_string(),
+            SkillFile {
+                content: "key = \"val\"".to_string(),
+                mime_type: "text/plain".to_string(),
+            },
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skill");
+        let files = write_skill_to_dir(&version, &skill_dir).unwrap();
+
+        assert!(files.contains(&"rules/cache-patterns.md".to_string()));
+        assert!(files.contains(&"templates/config.toml".to_string()));
+        assert!(skill_dir.join("rules/cache-patterns.md").is_file());
+        assert!(skill_dir.join("templates/config.toml").is_file());
+    }
+
+    #[test]
+    fn test_install_skips_disallowed_subdirs() {
+        let mut version = sample_version();
+        // Add a file in an unknown subdir (not in EXTRA_DIRS)
+        version.files.insert(
+            "secrets/key.pem".to_string(),
+            SkillFile {
+                content: "private".to_string(),
+                mime_type: "application/x-pem-file".to_string(),
+            },
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skill");
+        let files = write_skill_to_dir(&version, &skill_dir).unwrap();
+
+        // SKILL.md is written but the disallowed subdir is skipped
+        assert!(files.contains(&"SKILL.md".to_string()));
+        assert!(!files.contains(&"secrets/key.pem".to_string()));
+        assert!(!skill_dir.join("secrets").exists());
+    }
+
+    #[test]
+    fn test_install_skill_end_to_end() {
+        let tmp = tempfile::tempdir().unwrap();
+        let version = sample_version_with_files();
+        let mut manifest = InstalledManifest::default();
+
+        // install_skill uses cwd to resolve relative paths, so we need
+        // absolute paths for the install targets.
+        let target_dir = tmp.path().join("agents/skills/test-skill");
+
+        let options = InstallOptions {
+            targets: vec![InstallTarget::Agents],
+            global: false,
+            registry: "local:/test".to_string(),
+        };
+
+        // install_skill resolves relative paths via cwd. We'll use
+        // write_skill_to_dir directly with an absolute path instead,
+        // then call the manifest logic, since install_skill depends on
+        // the actual cwd.
+        let files = write_skill_to_dir(&version, &target_dir).unwrap();
+
+        let checksum = integrity::sha256_hex(&version.skill_md);
+        manifest.upsert(InstalledSkill {
+            owner: "testowner".to_string(),
+            name: "test-skill".to_string(),
+            version: version.version.clone(),
+            registry: options.registry.clone(),
+            checksum,
+            installed_to: target_dir.clone(),
+            installed_at: config::now_iso8601(),
+        });
+
+        assert!(files.contains(&"SKILL.md".to_string()));
+        assert!(files.contains(&"scripts/lint.sh".to_string()));
+        assert!(files.contains(&"references/guide.md".to_string()));
+        assert_eq!(manifest.skills.len(), 1);
+        assert_eq!(manifest.skills[0].registry, "local:/test");
+    }
+
+    #[test]
+    fn test_write_returns_sorted_files() {
+        let mut version = sample_version();
+        version.files.insert(
+            "scripts/z-last.sh".to_string(),
+            SkillFile {
+                content: "#!/bin/bash".to_string(),
+                mime_type: "text/x-shellscript".to_string(),
+            },
+        );
+        version.files.insert(
+            "assets/a-first.txt".to_string(),
+            SkillFile {
+                content: "first".to_string(),
+                mime_type: "text/plain".to_string(),
+            },
+        );
+
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("skill");
+        let files = write_skill_to_dir(&version, &skill_dir).unwrap();
+
+        // Files should be sorted alphabetically
+        let expected = vec![
+            "SKILL.md".to_string(),
+            "assets/a-first.txt".to_string(),
+            "scripts/z-last.sh".to_string(),
+        ];
+        assert_eq!(files, expected);
+    }
 }
