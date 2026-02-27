@@ -471,4 +471,86 @@ mod tests {
         let loaded_config = crate::index::load_config(&registry_path).unwrap();
         assert_eq!(loaded_config.registry.name, "legacy-registry");
     }
+
+    #[test]
+    fn test_init_registry_with_description() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry_path = dir.path().join("desc-registry");
+
+        init_registry(
+            &registry_path,
+            "desc-registry",
+            Some("A test registry with skills"),
+            false,
+        )
+        .unwrap();
+
+        let config = std::fs::read_to_string(registry_path.join("skillet.toml")).unwrap();
+        assert!(config.contains("description = \"A test registry with skills\""));
+    }
+
+    #[test]
+    fn test_cache_dir_for_url_ssh() {
+        let base = PathBuf::from("/tmp/skillet");
+        let dir = cache_dir_for_url(&base, "git@github.com:owner/repo.git");
+        // SSH URLs use ":" not "/", so rsplit('/') gets "git@github.com:owner_repo"
+        assert_eq!(dir, PathBuf::from("/tmp/skillet/git@github.com:owner_repo"));
+    }
+
+    #[test]
+    fn test_cache_dir_for_url_empty() {
+        let base = PathBuf::from("/tmp/skillet");
+        let dir = cache_dir_for_url(&base, "");
+        assert_eq!(dir, PathBuf::from("/tmp/skillet/default"));
+    }
+
+    #[test]
+    fn test_cache_dir_for_url_single_segment() {
+        let base = PathBuf::from("/tmp/skillet");
+        let dir = cache_dir_for_url(&base, "https://example.com/repo.git");
+        // rsplit('/').take(2) => ["repo", "example.com"] => "example.com_repo"
+        assert_eq!(dir, PathBuf::from("/tmp/skillet/example.com_repo"));
+    }
+
+    #[test]
+    fn test_parse_duration_invalid_suffix() {
+        let result = parse_duration("5d");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("unknown suffix"));
+    }
+
+    #[test]
+    fn test_parse_duration_not_a_number() {
+        let result = parse_duration("abc");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_duration_whitespace_trimmed() {
+        assert_eq!(parse_duration("  30s  ").unwrap(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn test_registry_id_local() {
+        let path = PathBuf::from("/home/user/my-registry");
+        let id = registry_id(&path, &[]);
+        assert_eq!(id, "local:/home/user/my-registry");
+    }
+
+    #[test]
+    fn test_registry_id_remote() {
+        let url = "https://github.com/owner/repo.git".to_string();
+        let cache_base = default_cache_dir();
+        let cached_path = cache_dir_for_url(&cache_base, &url);
+
+        let id = registry_id(&cached_path, std::slice::from_ref(&url));
+        assert_eq!(id, url);
+    }
+
+    #[test]
+    fn test_default_registry_url_is_set() {
+        assert!(!DEFAULT_REGISTRY_URL.is_empty());
+        assert!(DEFAULT_REGISTRY_URL.ends_with(".git"));
+    }
 }
