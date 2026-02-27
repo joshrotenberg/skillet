@@ -152,6 +152,20 @@ The default install target is `agents` (writes to `.agents/skills/`),
 which is the cross-agent convention. Other targets: `claude`, `cursor`,
 `copilot`, `windsurf`, `gemini`, `all`.
 
+### Embed skills in your project
+
+Add skills directly to any repo -- no registry required:
+
+```bash
+# Generate a skillet.toml with an inline skill
+skillet init-project --skill
+
+# Write your skill prompt
+$EDITOR SKILL.md
+
+# That's it. Run skillet from this directory and the skill is served.
+```
+
 ### Create and publish skills
 
 ```bash
@@ -217,6 +231,53 @@ skillet search rust \
 
 # Or configure defaults in ~/.config/skillet/config.toml
 ```
+
+### Project manifest (skillet.toml)
+
+Embed skills directly in any repository with a `skillet.toml` at the
+project root. No separate registry needed -- skillet auto-detects the
+manifest and serves embedded skills alongside registry skills.
+
+```toml
+[project]
+name = "my-tool"
+description = "A CLI tool with agent skills"
+
+[[project.authors]]
+name = "Alice"
+github = "alice"
+
+# Single inline skill (SKILL.md at project root)
+[skill]
+name = "my-tool-usage"
+description = "How to use my-tool"
+```
+
+Three layout modes:
+
+- **Single skill** (`[skill]`): one SKILL.md at the project root
+- **Multi-skill** (`[skills]`): a `.skillet/` directory with multiple skills
+- **Registry** (`[registry]`): replaces the legacy `config.toml` format
+
+All sections are optional and can be combined. Scaffold one with:
+
+```bash
+skillet init-project --skill             # single skill
+skillet init-project --multi             # multi-skill directory
+skillet init-project --skill --registry  # skill + registry
+```
+
+### Zero-config skill discovery
+
+Directories with only a `SKILL.md` (no `skill.toml`) are fully
+discoverable. Metadata is inferred automatically:
+
+- **name** from the directory name
+- **owner** from git remote, project authors, or parent directory
+- **version** defaults to `0.1.0`
+- **description** from the first non-heading line of SKILL.md
+
+`skill.toml` is only required for publishing to a registry.
 
 ### Local skill discovery
 
@@ -361,6 +422,7 @@ fetch content via resource templates.
 | Command | Description |
 |---|---|
 | `skillet init-skill <path>` | Scaffold a new skillpack. Supports `--description`, `--category`, `--tags` |
+| `skillet init-project [path]` | Generate a `skillet.toml` project manifest. Supports `--skill`, `--multi`, `--registry` |
 | `skillet validate <path>` | Validate a skillpack (includes safety scan). Supports `--skip-safety` |
 | `skillet pack <path>` | Validate + generate manifest + update version history |
 | `skillet publish <path> --repo <owner/repo>` | Pack + open a PR against the registry. Supports `--dry-run` |
@@ -369,7 +431,7 @@ fetch content via resource templates.
 
 | Command | Description |
 |---|---|
-| `skillet init-registry <path>` | Scaffold a new registry git repo. Supports `--name`, `--description` |
+| `skillet init-registry <path>` | Scaffold a new registry git repo. Supports `--name`, `--description`, `--legacy` |
 | `skillet [serve]` | Run the MCP server (default when no subcommand) |
 
 ### Trust and audit
@@ -437,12 +499,14 @@ discover_local = true   # auto-discover installed skills
 
 ## Skill format
 
-A skill is a directory with two required files:
+A skill is a directory with a `SKILL.md` prompt. For publishing, add a
+`skill.toml` with metadata. For local use or embedded projects, only
+`SKILL.md` is required -- metadata is inferred automatically.
 
 ```
 owner/skill-name/
-  skill.toml       # Registry metadata
-  SKILL.md         # Agent-compatible prompt
+  SKILL.md         # Agent-compatible prompt (required)
+  skill.toml       # Registry metadata (required for publishing)
   scripts/         # Optional executable scripts
   references/      # Optional reference docs
   assets/          # Optional templates, configs
@@ -484,10 +548,12 @@ works standalone.
 
 ## Status
 
-v0.1.0. The skill format is stable, both the CLI and MCP interface are
+v0.2.0. The skill format is stable, both the CLI and MCP interface are
 functional, and there's an
 [official registry](https://github.com/joshrotenberg/skillet-registry)
 with skills across development, devops, and security categories.
+`skillet.toml` provides a unified project manifest for embedding skills
+in any repository with zero-config discovery.
 
 See [open issues](https://github.com/joshrotenberg/skillet/issues) for
 what's next.

@@ -72,18 +72,22 @@ pub fn default_cache_dir() -> PathBuf {
 
 /// Initialize a new skill registry at the given path.
 ///
-/// Creates a git repo with `config.toml`, `README.md`, and `.gitignore`,
+/// Creates a git repo with registry config, `README.md`, and `.gitignore`,
 /// then makes an initial commit. If `description` is provided, it is
-/// included in `config.toml`. Maintainer info is auto-populated from
-/// the user's git config when available.
+/// included in the config. Maintainer info is auto-populated from the
+/// user's git config when available.
+///
+/// When `use_legacy` is `true`, generates a `config.toml` (old format).
+/// Otherwise generates a `skillet.toml` with a `[registry]` section.
 pub fn init_registry(
     path: &Path,
     name: &str,
     description: Option<&str>,
+    use_legacy: bool,
 ) -> crate::error::Result<()> {
     std::fs::create_dir_all(path)?;
 
-    // config.toml
+    // Build registry config content
     let mut config = format!("[registry]\nname = \"{name}\"\nversion = 1\n");
 
     if let Some(desc) = description {
@@ -128,7 +132,12 @@ pub fn init_registry(
         }
     }
 
-    std::fs::write(path.join("config.toml"), config)?;
+    let config_filename = if use_legacy {
+        "config.toml"
+    } else {
+        "skillet.toml"
+    };
+    std::fs::write(path.join(config_filename), config)?;
 
     // README.md
     let readme = format!(
@@ -240,6 +249,10 @@ pub fn init_registry(
 /// Priority: if any flags are provided (`registry_flags` or `remote_flags`),
 /// use only those. Otherwise fall back to the config file's registries.
 /// Errors if no registries are available from either source.
+///
+/// If `project_root` is provided and contains a `skillet.toml` with
+/// `[skill]` or `[skills]` sections, embedded skills are loaded after
+/// registries (lowest priority in merge order).
 ///
 /// Returns the merged skill index and the list of registry paths used
 /// (needed for registry identification in the installation manifest).
@@ -414,10 +427,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let registry_path = dir.path().join("my-registry");
 
-        init_registry(&registry_path, "my-registry", None).unwrap();
+        init_registry(&registry_path, "my-registry", None, false).unwrap();
 
-        // config.toml exists with correct name
-        let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();
+        // skillet.toml exists with correct name (new default)
+        let config = std::fs::read_to_string(registry_path.join("skillet.toml")).unwrap();
         assert!(config.contains("name = \"my-registry\""));
         assert!(config.contains("version = 1"));
 
@@ -440,5 +453,22 @@ mod tests {
         // Can be loaded as a valid registry
         let loaded_config = crate::index::load_config(&registry_path).unwrap();
         assert_eq!(loaded_config.registry.name, "my-registry");
+    }
+
+    #[test]
+    fn test_init_registry_legacy() {
+        let dir = tempfile::tempdir().unwrap();
+        let registry_path = dir.path().join("legacy-registry");
+
+        init_registry(&registry_path, "legacy-registry", None, true).unwrap();
+
+        // config.toml exists (legacy format)
+        let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();
+        assert!(config.contains("name = \"legacy-registry\""));
+        assert!(!registry_path.join("skillet.toml").exists());
+
+        // Can be loaded
+        let loaded_config = crate::index::load_config(&registry_path).unwrap();
+        assert_eq!(loaded_config.registry.name, "legacy-registry");
     }
 }

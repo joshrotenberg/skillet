@@ -391,8 +391,8 @@ fn init_registry_creates_files() {
         .stdout(predicate::str::contains("Initialized skill registry"));
 
     assert!(
-        registry_path.join("config.toml").exists(),
-        "config.toml should be created"
+        registry_path.join("skillet.toml").exists(),
+        "skillet.toml should be created"
     );
     assert!(
         registry_path.join(".gitignore").exists(),
@@ -413,7 +413,7 @@ fn init_registry_with_options() {
         .success();
 
     let config =
-        std::fs::read_to_string(registry_path.join("config.toml")).expect("read config.toml");
+        std::fs::read_to_string(registry_path.join("skillet.toml")).expect("read skillet.toml");
     assert!(
         config.contains("My Registry"),
         "should contain registry name: {config}"

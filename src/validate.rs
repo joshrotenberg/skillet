@@ -148,6 +148,76 @@ pub fn validate_skillpack(dir: &Path) -> crate::error::Result<ValidationResult> 
     })
 }
 
+/// Validate a skillpack directory leniently.
+///
+/// If `skill.toml` exists, delegates to strict [`validate_skillpack()`].
+/// If only `SKILL.md` exists, infers metadata from the directory context
+/// and the optional `skillet.toml` manifest. Returns an error if SKILL.md
+/// is missing.
+pub fn validate_skillpack_lenient(
+    dir: &Path,
+    manifest: Option<&crate::project::SkilletToml>,
+) -> crate::error::Result<ValidationResult> {
+    // If skill.toml exists, use strict validation
+    if dir.join("skill.toml").is_file() {
+        return validate_skillpack(dir);
+    }
+
+    let mut warnings = Vec::new();
+
+    // SKILL.md must exist
+    let md_path = dir.join("SKILL.md");
+    if !md_path.is_file() {
+        return Err(Error::Validation(format!(
+            "SKILL.md not found in {}",
+            dir.display()
+        )));
+    }
+
+    let skill_md = std::fs::read_to_string(&md_path).map_err(|e| Error::FileRead {
+        path: md_path.clone(),
+        source: e,
+    })?;
+
+    if skill_md.trim().is_empty() {
+        return Err(Error::Validation(format!(
+            "SKILL.md is empty in {}",
+            dir.display()
+        )));
+    }
+
+    warnings.push("No skill.toml found; metadata inferred from directory context".to_string());
+
+    let metadata = crate::project::infer_metadata(dir, &skill_md, manifest);
+
+    // Build a synthetic skill.toml for the validation result
+    let skill_toml_raw = format!(
+        "[skill]\nname = \"{}\"\nowner = \"{}\"\nversion = \"{}\"\ndescription = \"{}\"\n",
+        metadata.skill.name,
+        metadata.skill.owner,
+        metadata.skill.version,
+        metadata.skill.description,
+    );
+
+    let files = index::load_extra_files(dir)?;
+    let hashes = integrity::compute_hashes(&skill_toml_raw, &skill_md, &files);
+    let manifest_ok = verify_manifest_if_present(dir, &hashes, &mut warnings);
+
+    Ok(ValidationResult {
+        owner: metadata.skill.owner.clone(),
+        name: metadata.skill.name.clone(),
+        version: metadata.skill.version.clone(),
+        description: metadata.skill.description.clone(),
+        metadata,
+        skill_md,
+        skill_toml_raw,
+        files,
+        hashes,
+        manifest_ok,
+        warnings,
+    })
+}
+
 /// Read and verify `MANIFEST.sha256` if it exists.
 ///
 /// Returns `None` if no manifest, `Some(true)` if verified, `Some(false)` if
@@ -380,5 +450,45 @@ description = "test"
             result.warnings.iter().any(|w| w.contains("Manifest")),
             "should have manifest warning"
         );
+    }
+
+    #[test]
+    fn test_validate_lenient_skill_md_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "# My Skill\n\nA lenient skill.\n",
+        )
+        .unwrap();
+
+        let result = validate_skillpack_lenient(&skill_dir, None).expect("should validate");
+        assert_eq!(result.name, "my-skill");
+        assert_eq!(result.version, "0.1.0");
+        assert_eq!(result.description, "A lenient skill.");
+        assert!(result.warnings.iter().any(|w| w.contains("inferred")));
+    }
+
+    #[test]
+    fn test_validate_lenient_with_skill_toml_delegates_strict() {
+        let dir = test_registry().join("joshrotenberg/rust-dev");
+        if !dir.exists() {
+            return;
+        }
+        let result = validate_skillpack_lenient(&dir, None).expect("should validate");
+        assert_eq!(result.owner, "joshrotenberg");
+        assert_eq!(result.name, "rust-dev");
+    }
+
+    #[test]
+    fn test_validate_lenient_missing_skill_md() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("empty");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let result = validate_skillpack_lenient(&skill_dir, None);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("SKILL.md"));
     }
 }

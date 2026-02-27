@@ -323,7 +323,7 @@ mod tests {
                 assert_eq!(platform, "claude");
                 assert_eq!(path, &skill_dir);
             }
-            SkillSource::Registry => panic!("Expected Local source"),
+            other => panic!("Expected Local source, got {other:?}"),
         }
     }
 

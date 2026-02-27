@@ -15,6 +15,7 @@ pub mod install;
 pub mod integrity;
 pub mod manifest;
 pub mod pack;
+pub mod project;
 pub mod publish;
 pub mod registry;
 pub mod safety;

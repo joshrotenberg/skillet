@@ -51,6 +51,8 @@ enum Command {
     InitRegistry(InitRegistryArgs),
     /// Scaffold a new skillpack directory
     InitSkill(InitSkillArgs),
+    /// Initialize a skillet.toml project manifest
+    InitProject(InitProjectArgs),
     /// Install a skill from a registry
     Install(InstallArgs),
     /// Search for skills in registries
@@ -153,6 +155,10 @@ struct InitRegistryArgs {
     /// Registry description
     #[arg(long)]
     description: Option<String>,
+
+    /// Generate legacy config.toml instead of skillet.toml
+    #[arg(long)]
+    legacy: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -171,6 +177,33 @@ struct InitSkillArgs {
     /// Skill tags (comma-separated)
     #[arg(long, value_delimiter = ',')]
     tags: Vec<String>,
+}
+
+#[derive(clap::Args, Debug)]
+struct InitProjectArgs {
+    /// Directory for the project (defaults to current directory)
+    #[arg(default_value = ".")]
+    path: PathBuf,
+
+    /// Project name (defaults to directory name)
+    #[arg(long)]
+    name: Option<String>,
+
+    /// Project description
+    #[arg(long)]
+    description: Option<String>,
+
+    /// Include a \[skill\] section for a single inline skill
+    #[arg(long)]
+    skill: bool,
+
+    /// Include a \[skills\] section for multiple skills
+    #[arg(long)]
+    multi: bool,
+
+    /// Include a \[registry\] section
+    #[arg(long)]
+    registry: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -383,6 +416,7 @@ async fn main() -> ExitCode {
         Some(Command::Publish(args)) => cli::author::run_publish(args),
         Some(Command::InitRegistry(args)) => cli::author::run_init_registry(args),
         Some(Command::InitSkill(args)) => cli::author::run_init_skill(args),
+        Some(Command::InitProject(args)) => cli::author::run_init_project(args),
         Some(Command::Install(args)) => cli::install::run_install(args),
         Some(Command::Search(args)) => cli::search::run_search(args),
         Some(Command::Categories(args)) => cli::search::run_categories(args),
@@ -733,6 +767,30 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
     }
 
+    // Auto-detect skillet.toml in current directory for embedded skills
+    if let Some(project_root) = skillet_mcp::project::find_skillet_toml(std::path::Path::new(".")) {
+        match skillet_mcp::project::load_skillet_toml(&project_root) {
+            Ok(Some(manifest)) if manifest.skill.is_some() || manifest.skills.is_some() => {
+                let embedded = skillet_mcp::project::load_embedded_skills(&project_root, &manifest);
+                if !embedded.skills.is_empty() {
+                    tracing::info!(
+                        count = embedded.skills.len(),
+                        project = %project_root.display(),
+                        "Loaded embedded skills from skillet.toml"
+                    );
+                    merged_index.merge(embedded);
+                }
+            }
+            Ok(_) => {} // No skill sections or no manifest
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to load skillet.toml for embedded skills"
+                );
+            }
+        }
+    }
+
     let skill_search = search::SkillSearch::build(&merged_index);
     let mut remote_urls = args.remote.clone();
     remote_urls.extend(default_remote_urls);
@@ -833,6 +891,18 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
                     "Re-discovered local skills"
                 );
                 merged.merge(local_index);
+            }
+        }
+        // Re-load embedded skills from skillet.toml
+        if let Some(project_root) =
+            skillet_mcp::project::find_skillet_toml(std::path::Path::new("."))
+            && let Ok(Some(manifest)) = skillet_mcp::project::load_skillet_toml(&project_root)
+            && (manifest.skill.is_some() || manifest.skills.is_some())
+        {
+            let embedded = skillet_mcp::project::load_embedded_skills(&project_root, &manifest);
+            if !embedded.skills.is_empty() {
+                tracing::info!(count = embedded.skills.len(), "Re-loaded embedded skills");
+                merged.merge(embedded);
             }
         }
         merged

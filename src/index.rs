@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::Error;
 use crate::integrity;
+use crate::project;
 use crate::state::{
     RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
     VersionsManifest,
@@ -20,14 +21,24 @@ use crate::validate;
 /// Prevents runaway recursion on malformed registry trees.
 const MAX_NESTING_DEPTH: usize = 5;
 
-/// Load registry configuration from `config.toml` at the registry root.
+/// Load registry configuration from the registry root.
 ///
-/// If the file is absent, returns sensible defaults. If present but
-/// malformed, returns an error (fail loud rather than silently defaulting).
+/// Checks for `skillet.toml` with a `[registry]` section first, then falls
+/// back to the legacy `config.toml`. If neither is present, returns sensible
+/// defaults. If a file exists but is malformed, returns an error.
 pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig> {
+    // Try skillet.toml [registry] first
+    if let Some(manifest) = project::load_skillet_toml(registry_path)?
+        && let Some(config) = manifest.into_registry_config()
+    {
+        tracing::info!(name = %config.registry.name, "Loaded registry config from skillet.toml");
+        return Ok(config);
+    }
+
+    // Fall back to legacy config.toml
     let config_path = registry_path.join("config.toml");
     if !config_path.is_file() {
-        tracing::debug!("No config.toml found, using defaults");
+        tracing::debug!("No config.toml or skillet.toml [registry] found, using defaults");
         return Ok(RegistryConfig::default());
     }
 
@@ -40,7 +51,7 @@ pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig>
         source: e,
     })?;
 
-    tracing::info!(name = %config.registry.name, "Loaded registry config");
+    tracing::info!(name = %config.registry.name, "Loaded registry config from config.toml");
     Ok(config)
 }
 
@@ -173,10 +184,11 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     Ok(index)
 }
 
-/// Recursively find skill directories (those containing `skill.toml`).
+/// Recursively find skill directories (those containing `skill.toml` or `SKILL.md`).
 ///
-/// Walks `dir` looking for subdirectories that contain `skill.toml`.
-/// If a directory has `skill.toml`, it is collected and not recursed further.
+/// Walks `dir` looking for subdirectories that contain `skill.toml` (preferred)
+/// or at minimum `SKILL.md` (lenient / zero-config mode). If a directory has
+/// either marker, it is collected and not recursed further.
 /// If it doesn't and `remaining_depth > 0`, recurse into it.
 /// Hidden directories (starting with `.`) are always skipped.
 fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
@@ -200,7 +212,7 @@ fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
         }
 
         let path = entry.path();
-        if path.join("skill.toml").is_file() {
+        if path.join("skill.toml").is_file() || path.join("SKILL.md").is_file() {
             // This is a skill directory -- collect it, don't recurse further
             result.push(path);
         } else if remaining_depth > 0 {
@@ -219,8 +231,11 @@ fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
 
 /// Load a single skill from its directory.
 ///
-/// Uses `validate::validate_skillpack()` for core parsing and validation,
-/// then layers on registry-specific checks (owner/name match directory
+/// Uses `validate::validate_skillpack()` for core parsing and validation
+/// when `skill.toml` is present, or `validate::validate_skillpack_lenient()`
+/// for SKILL.md-only directories (zero-config mode).
+///
+/// Then layers on registry-specific checks (owner/name match directory
 /// structure, versions.toml handling).
 ///
 /// If `versions.toml` exists, builds a multi-version `SkillEntry` with one
@@ -230,26 +245,37 @@ fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
 ///
 /// Without `versions.toml`, behaves exactly as before (single version).
 fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<SkillEntry> {
-    let validated = validate::validate_skillpack(dir)?;
+    let has_skill_toml = dir.join("skill.toml").is_file();
+
+    let validated = if has_skill_toml {
+        validate::validate_skillpack(dir)?
+    } else {
+        // SKILL.md-only: use lenient validation with no manifest context
+        validate::validate_skillpack_lenient(dir, None)?
+    };
 
     // Registry-specific: owner/name must match directory structure
-    if validated.owner != owner {
-        return Err(Error::SkillLoad {
-            path: dir.to_path_buf(),
-            reason: format!(
-                "owner mismatch: skill.toml says '{}' but directory is '{}'",
-                validated.owner, owner
-            ),
-        });
-    }
-    if validated.name != name {
-        return Err(Error::SkillLoad {
-            path: dir.to_path_buf(),
-            reason: format!(
-                "name mismatch: skill.toml says '{}' but directory is '{}'",
-                validated.name, name
-            ),
-        });
+    // For lenient mode, the inferred name comes from the directory so it
+    // will always match; only check when skill.toml exists (strict mode).
+    if has_skill_toml {
+        if validated.owner != owner {
+            return Err(Error::SkillLoad {
+                path: dir.to_path_buf(),
+                reason: format!(
+                    "owner mismatch: skill.toml says '{}' but directory is '{}'",
+                    validated.owner, owner
+                ),
+            });
+        }
+        if validated.name != name {
+            return Err(Error::SkillLoad {
+                path: dir.to_path_buf(),
+                reason: format!(
+                    "name mismatch: skill.toml says '{}' but directory is '{}'",
+                    validated.name, name
+                ),
+            });
+        }
     }
 
     let versions_path = dir.join("versions.toml");
@@ -857,6 +883,7 @@ description = "Just a description, nothing else new"
             &registry_path,
             "described-registry",
             Some("A test registry with a description"),
+            false,
         )
         .unwrap();
 
