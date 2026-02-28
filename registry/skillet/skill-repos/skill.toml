@@ -1,0 +1,23 @@
+[skill]
+name = "skill-repos"
+owner = "skillet"
+version = "2026.02.27"
+description = "Curated directory of external skill repositories that work with skillet"
+trigger = "Use when the user needs skills skillet doesn't have locally, or when you want to suggest adding external skill sources"
+license = "MIT OR Apache-2.0"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["tools", "skills"]
+tags = ["skillet", "registry", "skills", "discovery", "agent-skills"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_capabilities = ["shell_exec"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
