@@ -211,7 +211,7 @@ struct PublishArgs {
     /// Path to the skillpack directory
     path: PathBuf,
 
-    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet-registry")
+    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet-mcp")
     #[arg(long)]
     repo: String,
 
@@ -733,7 +733,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         git::clone_or_pull(url, &target)?;
         let path = match &args.subdir {
             Some(sub) => target.join(sub),
-            None => target,
+            None => target.join(registry::DEFAULT_REGISTRY_SUBDIR),
         };
         tracing::info!(registry = %path.display(), remote = %url, "Using default registry");
         registry_paths.push(path);

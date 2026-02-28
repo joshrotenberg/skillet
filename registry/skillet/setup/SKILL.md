@@ -17,11 +17,21 @@ Add this to your `.mcp.json` (project-level) or `~/.claude/settings.json`
 {
   "mcpServers": {
     "skillet": {
+      "command": "skillet",
+      "args": ["serve"]
+    }
+  }
+}
+```
+
+Or with Docker (no install needed):
+
+```json
+{
+  "mcpServers": {
+    "skillet": {
       "command": "docker",
-      "args": ["run", "-i", "--rm", "ghcr.io/skillet/server:latest"],
-      "env": {
-        "SKILLET_REMOTE": "https://github.com/joshrotenberg/skillet-mcp.git"
-      }
+      "args": ["run", "-i", "--rm", "ghcr.io/joshrotenberg/skillet:latest"]
     }
   }
 }
@@ -76,3 +86,14 @@ If the user has a preference for how skills should be used, respect it:
 When the user's task could benefit from a skill you don't have locally,
 proactively search skillet. For example, if asked to write Python code
 and you don't have Python conventions loaded, search for Python skills.
+
+### Configuration
+
+Run `skillet setup` to generate `~/.config/skillet/config.toml`:
+
+```bash
+skillet setup                          # default setup
+skillet setup --target claude          # set default install target
+skillet setup --remote <url>           # add a custom registry
+skillet setup --no-official-registry   # skip the official registry
+```
