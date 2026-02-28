@@ -485,7 +485,7 @@ fn infer_owner(skill_dir: &Path, manifest: Option<&SkilletToml>) -> String {
 }
 
 /// Try to extract the repository owner from the git remote origin URL.
-fn owner_from_git_remote(dir: &Path) -> Option<String> {
+pub(crate) fn owner_from_git_remote(dir: &Path) -> Option<String> {
     let output = std::process::Command::new("git")
         .args(["remote", "get-url", "origin"])
         .current_dir(dir)
