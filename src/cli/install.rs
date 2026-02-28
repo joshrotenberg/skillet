@@ -38,10 +38,9 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
 
     let global = args.global || cli_config.install.global;
 
-    let (skill_index, registry_paths, _catalog) = match registry::load_registries_with_repos(
+    let (skill_index, registry_paths) = match registry::load_registries(
         &args.registries.registry,
         &args.registries.remote,
-        &args.registries.repo,
         &cli_config,
         args.registries.subdir.as_deref(),
     ) {

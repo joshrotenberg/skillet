@@ -24,12 +24,7 @@ pub(crate) fn run_setup(args: SetupArgs) -> ExitCode {
     }
     remotes.extend(args.remote);
 
-    let config = match config::generate_default_config_with_repos(
-        remotes,
-        args.registry,
-        args.repos,
-        &args.target,
-    ) {
+    let config = match config::generate_default_config(remotes, args.registry, &args.target) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {e}");

@@ -87,6 +87,10 @@ When the user's task could benefit from a skill you don't have locally,
 proactively search skillet. For example, if asked to write Python code
 and you don't have Python conventions loaded, search for Python skills.
 
+If search returns no results for the user's topic, check the
+`skillet/skill-repos` skill for external repositories that may cover it.
+Use `info_skill("skillet/skill-repos")` to see the curated list.
+
 ### Configuration
 
 Run `skillet setup` to generate `~/.config/skillet/config.toml`:

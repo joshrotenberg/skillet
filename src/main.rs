@@ -20,7 +20,6 @@ use tower_mcp::{McpRouter, StdioTransport};
 use skillet_mcp::cache::{self, RegistrySource};
 use skillet_mcp::config;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
-use skillet_mcp::repo;
 use skillet_mcp::state::AppState;
 use skillet_mcp::{discover, git, index, registry, search, state};
 
@@ -70,8 +69,6 @@ enum Command {
     Audit(AuditArgs),
     /// Generate initial configuration
     Setup(SetupArgs),
-    /// List available external skill repos from the catalog
-    Repos(ReposArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -239,21 +236,6 @@ struct RegistryArgs {
     #[arg(long)]
     remote: Vec<String>,
 
-    /// Repo short name from the catalog (can be specified multiple times, e.g. anthropics/skills)
-    #[arg(long)]
-    repo: Vec<String>,
-
-    /// Subdirectory within registries that contains the skills
-    #[arg(long)]
-    subdir: Option<PathBuf>,
-
-    /// Bypass the disk cache and rebuild the index from scratch
-    #[arg(long)]
-    no_cache: bool,
-}
-
-#[derive(clap::Args, Debug)]
-struct ReposArgs {
     /// Subdirectory within registries that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
@@ -405,10 +387,6 @@ struct SetupArgs {
     #[arg(long)]
     registry: Vec<PathBuf>,
 
-    /// Repo short names from the catalog (comma-separated, e.g. anthropics/skills,vercel-labs/agent-skills)
-    #[arg(long, value_delimiter = ',')]
-    repos: Vec<String>,
-
     /// Default install target (agents, claude, cursor, copilot, windsurf, gemini, all)
     #[arg(long, default_value = "agents")]
     target: String,
@@ -443,7 +421,6 @@ async fn main() -> ExitCode {
         Some(Command::Trust(args)) => cli::trust::run_trust(args),
         Some(Command::Audit(args)) => cli::trust::run_audit(args),
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
-        Some(Command::Repos(args)) => cli::repos::run_repos(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     };
@@ -472,7 +449,7 @@ const ALL_TOOL_NAMES: &[&str] = &[
 ];
 
 /// All known resource short names.
-const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files", "repos"];
+const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files"];
 
 /// Resolved set of capabilities to expose from the MCP server.
 struct ServerCapabilities {
@@ -562,10 +539,6 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
     if caps.resources.contains("files") {
         router = router.resource_template(resources::skill_files::build(state.clone()));
     }
-    if caps.resources.contains("repos") {
-        router = router.resource_template(resources::repos::build(state.clone()));
-        router = router.resource(resources::repos::build_list(state.clone()));
-    }
 
     // Build dynamic instructions based on exposed capabilities
     router = router.instructions(build_instructions(caps));
@@ -652,12 +625,6 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
             "- skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
              (scripts, references, or assets)",
         );
-    }
-    if caps.resources.contains("repos") {
-        resource_lines.push(
-            "- skillet://repos/{owner}/{name}: Get metadata for a curated external skill repo",
-        );
-        resource_lines.push("- skillet://repos/: List all curated external skill repos");
     }
     if !resource_lines.is_empty() {
         text.push_str("Resources:\n");
@@ -820,32 +787,6 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
     }
 
-    // Load repo catalog from the first registry path
-    let repos_catalog = registry_paths
-        .first()
-        .and_then(|p| repo::load_repos_catalog(p).ok())
-        .unwrap_or_default();
-
-    // Resolve repos from config
-    let cli_repos = &cli_config.registries.repos;
-    if !cli_repos.is_empty() {
-        let repo_names: Vec<&str> = cli_repos.iter().map(|s| s.as_str()).collect();
-        let cache_ttl = if cli_config.cache.enabled {
-            parse_duration(&cli_config.cache.ttl).unwrap_or(Duration::from_secs(300))
-        } else {
-            Duration::ZERO
-        };
-        registry::resolve_repos(
-            &repo_names,
-            &repos_catalog,
-            &cache_base,
-            cli_config.cache.enabled,
-            cache_ttl,
-            &mut merged_index,
-            &mut registry_paths,
-        );
-    }
-
     let skill_search = search::SkillSearch::build(&merged_index);
     let mut remote_urls = args.remote.clone();
     remote_urls.extend(default_remote_urls);
@@ -855,7 +796,6 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         merged_index,
         skill_search,
         config,
-        repos_catalog,
     );
 
     // Determine refresh interval: CLI flag wins, then registry defaults, then "5m"
@@ -1163,7 +1103,13 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1784,7 +1730,13 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1882,7 +1834,13 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1950,7 +1908,13 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1982,7 +1946,13 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         // Only include search, not info
         let caps = ServerCapabilities {
             tools: ["search"].iter().map(|&s| s.to_string()).collect(),
@@ -2359,7 +2329,13 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ["search", "categories"]
                 .iter()
@@ -2558,7 +2534,13 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ["search"].iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -2895,7 +2877,13 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -2968,7 +2956,13 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -3057,7 +3051,13 @@ mod tests {
         merged.merge(local_index);
 
         let skill_search = search::SkillSearch::build(&merged);
-        let state = AppState::new_test(vec![registry_path], merged, skill_search, config);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            merged,
+            skill_search,
+            config,
+        );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
