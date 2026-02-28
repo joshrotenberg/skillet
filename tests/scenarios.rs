@@ -590,6 +590,470 @@ fn write_registry_config(registry: &std::path::Path, name: &str) {
     std::fs::write(registry.join("config.toml"), config).expect("write config.toml");
 }
 
+// ── Publish workflow (#143) ──────────────────────────────────────
+
+/// init-skill -> write content -> pack -> publish --dry-run -> verify output
+#[test]
+fn scenario_publish_dry_run() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let skill_path = tmp.path().join("testauthor/publishable-skill");
+
+    // Step 1: Scaffold
+    skillet()
+        .args(["init-skill"])
+        .arg(&skill_path)
+        .args([
+            "--description",
+            "A skill ready to publish",
+            "--category",
+            "development",
+        ])
+        .assert()
+        .success();
+
+    // Step 2: Write real content
+    std::fs::write(
+        skill_path.join("SKILL.md"),
+        "# Publishable Skill\n\nThis skill is ready for publishing.\n\n## Usage\n\nJust use it.\n",
+    )
+    .expect("write SKILL.md");
+
+    // Step 3: Validate first
+    skillet()
+        .args(["validate"])
+        .arg(&skill_path)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Validation passed"));
+
+    // Step 4: Publish with --dry-run (doesn't need gh CLI)
+    skillet()
+        .args(["publish"])
+        .arg(&skill_path)
+        .args(["--repo", "testowner/test-registry", "--dry-run"])
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("Dry run")
+                .and(predicate::str::contains("testauthor/publishable-skill"))
+                .and(predicate::str::contains("testowner/test-registry"))
+                .and(predicate::str::contains("Fork"))
+                .and(predicate::str::contains("branch"))
+                .and(predicate::str::contains("PR")),
+        );
+
+    // Step 5: Pack artifacts should have been created by publish (it calls pack internally)
+    assert!(
+        skill_path.join("MANIFEST.sha256").exists(),
+        "MANIFEST.sha256 should be created by publish --dry-run"
+    );
+    assert!(
+        skill_path.join("versions.toml").exists(),
+        "versions.toml should be created by publish --dry-run"
+    );
+}
+
+/// publish --dry-run with --registry-path overrides destination
+#[test]
+fn scenario_publish_dry_run_custom_path() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let skill_path = tmp.path().join("testauthor/nested-skill");
+
+    skillet()
+        .args(["init-skill"])
+        .arg(&skill_path)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["publish"])
+        .arg(&skill_path)
+        .args([
+            "--repo",
+            "owner/repo",
+            "--dry-run",
+            "--registry-path",
+            "acme/lang/java/nested-skill",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("acme/lang/java/nested-skill"));
+}
+
+// ── Project manifest lifecycle (#144) ────────────────────────────
+//
+// Local discovery (#144) only runs in MCP server context, not CLI.
+// These tests exercise project manifest features testable via CLI.
+
+/// init-project -> add skills -> search finds them via --registry
+#[test]
+fn scenario_project_manifest_as_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let project = tmp.path().join("my-project");
+    std::fs::create_dir_all(&project).expect("create project dir");
+
+    // Step 1: Create a project with a skills directory
+    let skills_dir = project.join("skills");
+    std::fs::create_dir_all(&skills_dir).expect("create skills dir");
+
+    // Write skillet.toml with [skills] pointing to skills/
+    std::fs::write(
+        project.join("skillet.toml"),
+        "[project]\nname = \"my-project\"\ndescription = \"Test project\"\n\n[skills]\npath = \"skills\"\n",
+    )
+    .expect("write skillet.toml");
+
+    // Step 2: Add a skill in skills/
+    let skill_dir = skills_dir.join("my-tool");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(
+        skill_dir.join("SKILL.md"),
+        "# My Tool\n\nA project-embedded skill for testing.\n",
+    )
+    .expect("write SKILL.md");
+
+    // Step 3: Search with --registry pointing at the project
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("my-tool"));
+}
+
+/// init-project scaffolding creates correct structure
+#[test]
+fn scenario_init_project_lifecycle() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let project = tmp.path().join("new-project");
+
+    // Step 1: Init project with --skill
+    skillet()
+        .args(["init-project"])
+        .arg(&project)
+        .args(["--skill"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("skillet.toml"));
+
+    // Step 2: Verify structure
+    assert!(
+        project.join("skillet.toml").exists(),
+        "skillet.toml should exist"
+    );
+    assert!(
+        project.join("SKILL.md").exists(),
+        "SKILL.md should exist for --skill"
+    );
+
+    // Step 3: skillet.toml should have [skill] section
+    let toml = std::fs::read_to_string(project.join("skillet.toml")).expect("read skillet.toml");
+    assert!(
+        toml.contains("[skill]"),
+        "should have [skill] section: {toml}"
+    );
+    assert!(
+        toml.contains("[project]"),
+        "should have [project] section: {toml}"
+    );
+
+    // Step 4: Search with --registry should find the embedded skill
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("new-project"));
+}
+
+/// init-project with --multi creates multi-skill directory
+#[test]
+fn scenario_init_project_multi() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let project = tmp.path().join("multi-project");
+
+    // Step 1: Init with --multi
+    skillet()
+        .args(["init-project"])
+        .arg(&project)
+        .args(["--multi"])
+        .assert()
+        .success();
+
+    // Step 2: Verify structure
+    let toml = std::fs::read_to_string(project.join("skillet.toml")).expect("read skillet.toml");
+    assert!(
+        toml.contains("[skills]"),
+        "should have [skills] section: {toml}"
+    );
+
+    // Step 3: Add skills to .skillet/ directory
+    let skill_dir = project.join(".skillet/helper");
+    std::fs::create_dir_all(&skill_dir).expect("create skill dir");
+    std::fs::write(skill_dir.join("SKILL.md"), "# Helper\n\nA helper skill.\n")
+        .expect("write SKILL.md");
+
+    // Step 4: Search should find it
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&project)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("helper"));
+}
+
+// ── Config and setup workflow (#145) ─────────────────────────────
+
+/// setup -> verify config -> customize -> verify effects
+#[test]
+fn scenario_config_lifecycle() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Step 1: Run setup
+    skillet()
+        .args(["setup", "--target", "claude", "--no-official-registry"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("config.toml"));
+
+    let config_path = home.join(".config/skillet/config.toml");
+    assert!(config_path.exists(), "config.toml should exist");
+
+    let config = std::fs::read_to_string(&config_path).expect("read config");
+    assert!(
+        config.contains("claude"),
+        "config should contain claude target: {config}"
+    );
+
+    // Step 2: Install with the config (should use claude target from config)
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    // Should install to .claude/ (from config target), not .agents/
+    assert!(
+        tmp.path().join(".claude/skills/rust-dev/SKILL.md").exists(),
+        "should install to .claude/ per config"
+    );
+
+    // Step 3: setup --force regenerates config
+    skillet()
+        .args([
+            "setup",
+            "--target",
+            "agents",
+            "--force",
+            "--no-official-registry",
+        ])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    let updated_config = std::fs::read_to_string(&config_path).expect("read updated config");
+    assert!(
+        updated_config.contains("agents"),
+        "regenerated config should contain agents target: {updated_config}"
+    );
+}
+
+/// Setup with custom registry, verify it appears in config
+#[test]
+fn scenario_setup_with_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["setup", "--registry"])
+        .arg(test_registry())
+        .args(["--no-official-registry"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    let config_path = home.join(".config/skillet/config.toml");
+    let config = std::fs::read_to_string(&config_path).expect("read config");
+    assert!(
+        config.contains("test-registry"),
+        "config should reference the local registry: {config}"
+    );
+
+    // Verify the registry is usable via config (no --registry flag needed)
+    skillet()
+        .args(["search", "rust"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust-dev"));
+}
+
+// ── Error recovery and edge cases (#146) ─────────────────────────
+
+/// Malformed skill.toml in registry is skipped, valid skills still load
+#[test]
+fn scenario_malformed_skill_skipped() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let registry = tmp.path().join("registry");
+
+    // Create a valid skill
+    create_mini_skill(&registry, "good", "valid-skill", "A valid skill");
+
+    // Create a malformed skill (bad TOML)
+    let bad_skill = registry.join("bad/broken-skill");
+    std::fs::create_dir_all(&bad_skill).expect("create bad skill dir");
+    std::fs::write(bad_skill.join("skill.toml"), "[skill\nname = broken").expect("write bad toml");
+    std::fs::write(bad_skill.join("SKILL.md"), "# Broken\n").expect("write SKILL.md");
+
+    write_registry_config(&registry, "Mixed Registry");
+
+    // Search should find the valid skill and skip the broken one
+    let output = skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&registry)
+        .output()
+        .expect("search");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("valid-skill"),
+        "valid skill should be found: {stdout}"
+    );
+    assert!(
+        !stdout.contains("broken-skill"),
+        "broken skill should be skipped: {stdout}"
+    );
+}
+
+/// Empty registry returns no results without error
+#[test]
+fn scenario_empty_registry() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let registry = tmp.path().join("empty-registry");
+    std::fs::create_dir_all(&registry).expect("create empty registry");
+    write_registry_config(&registry, "Empty Registry");
+
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&registry)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No skills found"));
+}
+
+/// Multi-registry where one has errors, other registry's skills still available
+#[test]
+fn scenario_mixed_registry_health() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+
+    // Good registry
+    let good_reg = tmp.path().join("good-reg");
+    create_mini_skill(&good_reg, "alice", "good-skill", "A working skill");
+    write_registry_config(&good_reg, "Good Registry");
+
+    // Bad registry: malformed skill only
+    let bad_reg = tmp.path().join("bad-reg");
+    let bad_skill = bad_reg.join("broken/bad-skill");
+    std::fs::create_dir_all(&bad_skill).expect("create bad skill dir");
+    std::fs::write(bad_skill.join("skill.toml"), "not valid toml {{{{").expect("write bad toml");
+    std::fs::write(bad_skill.join("SKILL.md"), "# Bad\n").expect("write SKILL.md");
+    write_registry_config(&bad_reg, "Bad Registry");
+
+    // Search across both registries
+    let output = skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&good_reg)
+        .args(["--registry"])
+        .arg(&bad_reg)
+        .output()
+        .expect("search");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("good-skill"),
+        "good registry skills should still work: {stdout}"
+    );
+}
+
+/// Corrupt cache is recovered gracefully
+#[test]
+fn scenario_corrupt_cache_recovery() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    let cache_dir = tmp.path().join("cache");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&cache_dir).expect("create cache dir");
+
+    // First search populates cache
+    skillet()
+        .args(["search", "rust", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .env("SKILLET_CACHE_DIR", &cache_dir)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust-dev"));
+
+    // Corrupt all cache files
+    if let Ok(entries) = std::fs::read_dir(&cache_dir) {
+        for entry in entries.flatten() {
+            if entry.path().is_file() {
+                std::fs::write(entry.path(), "not valid json {{{").expect("corrupt cache file");
+            }
+        }
+    }
+
+    // Second search should recover gracefully (rebuild from source)
+    skillet()
+        .args(["search", "rust", "--registry"])
+        .arg(test_registry())
+        .env("HOME", &home)
+        .env("SKILLET_CACHE_DIR", &cache_dir)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("rust-dev"));
+}
+
+/// Install from a registry that has a skill missing SKILL.md
+#[test]
+fn scenario_missing_skill_md_skipped() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let registry = tmp.path().join("registry");
+
+    // Valid skill
+    create_mini_skill(&registry, "owner", "good-skill", "Has everything");
+
+    // Skill with only skill.toml, no SKILL.md
+    let no_md = registry.join("owner/no-md-skill");
+    std::fs::create_dir_all(&no_md).expect("create no-md skill dir");
+    std::fs::write(
+        no_md.join("skill.toml"),
+        "[skill]\nname = \"no-md-skill\"\nowner = \"owner\"\nversion = \"1.0.0\"\ndescription = \"Missing SKILL.md\"\n",
+    )
+    .expect("write skill.toml");
+
+    write_registry_config(&registry, "Test Registry");
+
+    // Search should find the good skill, skip the one without SKILL.md
+    let output = skillet()
+        .args(["search", "*", "--registry"])
+        .arg(&registry)
+        .output()
+        .expect("search");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("good-skill"),
+        "valid skill should be found: {stdout}"
+    );
+}
+
 // ── npm repo compatibility ───────────────────────────────────────
 
 /// search -> info -> install with rules/ files -> verify rules written to disk
