@@ -20,6 +20,9 @@ use tower_mcp::{McpRouter, StdioTransport};
 use skillet_mcp::cache::{self, RegistrySource};
 use skillet_mcp::config;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
+use skillet_mcp::repo;
+#[cfg(test)]
+use skillet_mcp::repo::RepoCatalog;
 use skillet_mcp::state::AppState;
 use skillet_mcp::{discover, git, index, registry, search, state};
 
@@ -69,6 +72,8 @@ enum Command {
     Audit(AuditArgs),
     /// Generate initial configuration
     Setup(SetupArgs),
+    /// List available external skill repos from the catalog
+    Repos(ReposArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -236,6 +241,21 @@ struct RegistryArgs {
     #[arg(long)]
     remote: Vec<String>,
 
+    /// Repo short name from the catalog (can be specified multiple times, e.g. anthropics/skills)
+    #[arg(long)]
+    repo: Vec<String>,
+
+    /// Subdirectory within registries that contains the skills
+    #[arg(long)]
+    subdir: Option<PathBuf>,
+
+    /// Bypass the disk cache and rebuild the index from scratch
+    #[arg(long)]
+    no_cache: bool,
+}
+
+#[derive(clap::Args, Debug)]
+struct ReposArgs {
     /// Subdirectory within registries that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
@@ -387,6 +407,10 @@ struct SetupArgs {
     #[arg(long)]
     registry: Vec<PathBuf>,
 
+    /// Repo short names from the catalog (comma-separated, e.g. anthropics/skills,vercel-labs/agent-skills)
+    #[arg(long, value_delimiter = ',')]
+    repos: Vec<String>,
+
     /// Default install target (agents, claude, cursor, copilot, windsurf, gemini, all)
     #[arg(long, default_value = "agents")]
     target: String,
@@ -421,6 +445,7 @@ async fn main() -> ExitCode {
         Some(Command::Trust(args)) => cli::trust::run_trust(args),
         Some(Command::Audit(args)) => cli::trust::run_audit(args),
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
+        Some(Command::Repos(args)) => cli::repos::run_repos(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
     };
@@ -449,7 +474,7 @@ const ALL_TOOL_NAMES: &[&str] = &[
 ];
 
 /// All known resource short names.
-const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files"];
+const ALL_RESOURCE_NAMES: &[&str] = &["skills", "metadata", "files", "repos"];
 
 /// Resolved set of capabilities to expose from the MCP server.
 struct ServerCapabilities {
@@ -539,6 +564,10 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
     if caps.resources.contains("files") {
         router = router.resource_template(resources::skill_files::build(state.clone()));
     }
+    if caps.resources.contains("repos") {
+        router = router.resource_template(resources::repos::build(state.clone()));
+        router = router.resource(resources::repos::build_list(state.clone()));
+    }
 
     // Build dynamic instructions based on exposed capabilities
     router = router.instructions(build_instructions(caps));
@@ -625,6 +654,12 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
             "- skillet://files/{owner}/{name}/{path}: Get a file from the skillpack \
              (scripts, references, or assets)",
         );
+    }
+    if caps.resources.contains("repos") {
+        resource_lines.push(
+            "- skillet://repos/{owner}/{name}: Get metadata for a curated external skill repo",
+        );
+        resource_lines.push("- skillet://repos/: List all curated external skill repos");
     }
     if !resource_lines.is_empty() {
         text.push_str("Resources:\n");
@@ -787,6 +822,48 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
     }
 
+    // Load repo catalog from the first registry path
+    let repos_catalog = registry_paths
+        .first()
+        .and_then(|p| repo::load_repos_catalog(p).ok())
+        .unwrap_or_default();
+
+    // Resolve repos from config
+    let cli_repos = &cli_config.registries.repos;
+    if !cli_repos.is_empty() {
+        let cache_base_repos = args.cache_dir.clone().unwrap_or_else(default_cache_dir);
+        for repo_name in cli_repos {
+            if let Some(entry) = repos_catalog.find(repo_name) {
+                let target = cache_dir_for_url(&cache_base_repos, &entry.url);
+                if let Some(parent) = target.parent() {
+                    let _ = std::fs::create_dir_all(parent);
+                }
+                if let Err(e) = git::clone_or_pull(&entry.url, &target) {
+                    tracing::warn!(repo = %repo_name, error = %e, "Failed to clone repo, skipping");
+                    continue;
+                }
+                let path = match &entry.subdir {
+                    Some(sub) => target.join(sub),
+                    None => target.clone(),
+                };
+                tracing::info!(repo = %repo_name, path = %path.display(), "Adding catalog repo");
+                registry_paths.push(path.clone());
+                match index::load_index(&path) {
+                    Ok(idx) => merged_index.merge(idx),
+                    Err(e) => {
+                        tracing::warn!(
+                            repo = %repo_name,
+                            error = %e,
+                            "Failed to load repo index, skipping"
+                        );
+                    }
+                }
+            } else {
+                tracing::warn!(repo = %repo_name, "Unknown repo in catalog, skipping");
+            }
+        }
+    }
+
     let skill_search = search::SkillSearch::build(&merged_index);
     let mut remote_urls = args.remote.clone();
     remote_urls.extend(default_remote_urls);
@@ -796,6 +873,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         merged_index,
         skill_search,
         config,
+        repos_catalog,
     );
 
     // Determine refresh interval: CLI flag wins, then registry defaults, then "5m"
@@ -1109,6 +1187,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1736,6 +1815,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1840,6 +1920,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1914,6 +1995,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1952,6 +2034,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         // Only include search, not info
         let caps = ServerCapabilities {
@@ -2335,6 +2418,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ["search", "categories"]
@@ -2540,6 +2624,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ["search"].iter().map(|&s| s.to_string()).collect(),
@@ -2883,6 +2968,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -2962,6 +3048,7 @@ mod tests {
             skill_index,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -3057,6 +3144,7 @@ mod tests {
             merged,
             skill_search,
             config,
+            RepoCatalog::default(),
         );
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
