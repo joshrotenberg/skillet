@@ -2,6 +2,42 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-02-28
+
+### Bug Fixes
+
+- Load official registry catalog even with custom remotes ([#167](https://github.com/joshrotenberg/skillet/pull/167))
+- Index external repos with flat directory structures ([#169](https://github.com/joshrotenberg/skillet/pull/169))
+
+### Features
+
+- Support nested skill directories in registries ([#126](https://github.com/joshrotenberg/skillet/pull/126)) ([#127](https://github.com/joshrotenberg/skillet/pull/127))
+- Implement skillet.toml unified project manifest ([#148](https://github.com/joshrotenberg/skillet/pull/148))
+- Support npm-style skill repos as registries ([#152](https://github.com/joshrotenberg/skillet/pull/152))
+- Move official registry into main repo ([#159](https://github.com/joshrotenberg/skillet/pull/159))
+- Add skill-repos skill with curated external skill sources ([#160](https://github.com/joshrotenberg/skillet/pull/160))
+- Add repo catalog and resource templates ([#166](https://github.com/joshrotenberg/skillet/pull/166))
+
+### Miscellaneous Tasks
+
+- Add MIT and Apache-2.0 license files ([#124](https://github.com/joshrotenberg/skillet/pull/124))
+- Remove legacy config.toml registry support ([#161](https://github.com/joshrotenberg/skillet/pull/161))
+
+### Refactor
+
+- Remove repo catalog, move curation to SKILL.md ([#170](https://github.com/joshrotenberg/skillet/pull/170))
+
+### Testing
+
+- Add unit tests for state, git, and publish modules ([#153](https://github.com/joshrotenberg/skillet/pull/153))
+- Expand coverage for install, pack, and registry modules ([#154](https://github.com/joshrotenberg/skillet/pull/154))
+- Add integration tests for CLI hygiene, publish, and audit/trust ([#155](https://github.com/joshrotenberg/skillet/pull/155))
+- Add scenario tests for publish, project manifest, config, and error recovery ([#156](https://github.com/joshrotenberg/skillet/pull/156))
+- Add MCP integration tests for tools, resources, and local discovery ([#157](https://github.com/joshrotenberg/skillet/pull/157))
+- Add HTTP transport integration tests ([#158](https://github.com/joshrotenberg/skillet/pull/158))
+
+
+
 ## [0.2.0] - 2026-02-27
 
 ### Bug Fixes
