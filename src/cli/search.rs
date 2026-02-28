@@ -19,9 +19,10 @@ pub(crate) fn run_search(args: SearchArgs) -> ExitCode {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
+    let (skill_index, _registry_paths, _catalog) = match registry::load_registries_with_repos(
         &args.registries.registry,
         &args.registries.remote,
+        &args.registries.repo,
         &cli_config,
         args.registries.subdir.as_deref(),
     ) {
@@ -116,9 +117,10 @@ pub(crate) fn run_categories(args: CategoriesArgs) -> ExitCode {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
+    let (skill_index, _registry_paths, _catalog) = match registry::load_registries_with_repos(
         &args.registries.registry,
         &args.registries.remote,
+        &args.registries.repo,
         &cli_config,
         args.registries.subdir.as_deref(),
     ) {
@@ -174,9 +176,10 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
+    let (skill_index, _registry_paths, _catalog) = match registry::load_registries_with_repos(
         &args.registries.registry,
         &args.registries.remote,
+        &args.registries.repo,
         &cli_config,
         args.registries.subdir.as_deref(),
     ) {

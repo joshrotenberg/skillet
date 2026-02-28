@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::cache::{self, RegistrySource};
 use crate::config::SkilletConfig;
 use crate::error::Error;
+use crate::repo::RepoCatalog;
 use crate::state::SkillIndex;
 use crate::{git, index};
 
@@ -246,10 +247,6 @@ pub fn init_registry(
 /// use only those. Otherwise fall back to the config file's registries.
 /// Errors if no registries are available from either source.
 ///
-/// If `project_root` is provided and contains a `skillet.toml` with
-/// `[skill]` or `[skills]` sections, embedded skills are loaded after
-/// registries (lowest priority in merge order).
-///
 /// Returns the merged skill index and the list of registry paths used
 /// (needed for registry identification in the installation manifest).
 pub fn load_registries(
@@ -258,6 +255,26 @@ pub fn load_registries(
     config: &SkilletConfig,
     subdir: Option<&Path>,
 ) -> crate::error::Result<(SkillIndex, Vec<PathBuf>)> {
+    let (index, paths, _catalog) =
+        load_registries_with_repos(registry_flags, remote_flags, &[], config, subdir)?;
+    Ok((index, paths))
+}
+
+/// Load and merge registries, resolving repo short names from the catalog.
+///
+/// `repo_flags` are short names (e.g. `anthropics/skills`) resolved against
+/// the catalog loaded from the official registry.
+///
+/// Returns `(merged_index, registry_paths, catalog)`. The catalog is loaded
+/// from the official registry and can be stored for later use (e.g. on
+/// `AppState` for MCP resource templates).
+pub fn load_registries_with_repos(
+    registry_flags: &[PathBuf],
+    remote_flags: &[String],
+    repo_flags: &[String],
+    config: &SkilletConfig,
+    subdir: Option<&Path>,
+) -> crate::error::Result<(SkillIndex, Vec<PathBuf>, RepoCatalog)> {
     let has_flags = !registry_flags.is_empty() || !remote_flags.is_empty();
 
     let (local_paths, remote_urls): (Vec<PathBuf>, Vec<&str>) = if has_flags {
@@ -328,6 +345,8 @@ pub fn load_registries(
     }
 
     // Clone/pull remote registries
+    // Track the first registry root for catalog loading
+    let mut official_registry_root: Option<PathBuf> = None;
     for url in &remote_urls {
         let target = cache_dir_for_url(&cache_base, url);
         if let Some(parent) = target.parent() {
@@ -340,6 +359,11 @@ pub fn load_registries(
             None => target.clone(),
         };
         registry_paths.push(path.clone());
+
+        // Remember the official registry root for catalog loading
+        if *url == DEFAULT_REGISTRY_URL && official_registry_root.is_none() {
+            official_registry_root = Some(path.clone());
+        }
 
         let source = RegistrySource::Remote {
             url: url.to_string(),
@@ -358,7 +382,97 @@ pub fn load_registries(
         merged.merge(idx);
     }
 
-    Ok((merged, registry_paths))
+    // Load repo catalog from the official registry
+    let catalog = if let Some(ref root) = official_registry_root {
+        crate::repo::load_repos_catalog(root).unwrap_or_default()
+    } else {
+        RepoCatalog::default()
+    };
+
+    // Resolve repo short names from catalog.
+    // Repo names come from CLI flags (if any) or config file.
+    let repo_names: Vec<&str> = if !repo_flags.is_empty() {
+        repo_flags.iter().map(|s| s.as_str()).collect()
+    } else if !config.registries.repos.is_empty() {
+        config.registries.repos.iter().map(|s| s.as_str()).collect()
+    } else {
+        Vec::new()
+    };
+
+    resolve_repos(
+        &repo_names,
+        &catalog,
+        &cache_base,
+        cache_enabled,
+        cache_ttl,
+        &mut merged,
+        &mut registry_paths,
+    );
+
+    Ok((merged, registry_paths, catalog))
+}
+
+/// Clone/pull repos from the catalog and merge their indexes.
+///
+/// Failed clones and unknown repo names are logged and skipped -- this
+/// keeps both the CLI and MCP server paths resilient to transient
+/// network errors or stale config entries.
+pub fn resolve_repos(
+    repo_names: &[&str],
+    catalog: &RepoCatalog,
+    cache_base: &Path,
+    cache_enabled: bool,
+    cache_ttl: Duration,
+    merged: &mut SkillIndex,
+    registry_paths: &mut Vec<PathBuf>,
+) {
+    for repo_name in repo_names {
+        let Some(entry) = catalog.find(repo_name) else {
+            tracing::warn!(repo = %repo_name, "Unknown repo in catalog, skipping");
+            continue;
+        };
+
+        let target = cache_dir_for_url(cache_base, &entry.url);
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Err(e) = git::clone_or_pull(&entry.url, &target) {
+            tracing::warn!(repo = %repo_name, error = %e, "Failed to clone repo, skipping");
+            continue;
+        }
+
+        let path = match &entry.subdir {
+            Some(sub) => target.join(sub),
+            None => target.clone(),
+        };
+        registry_paths.push(path.clone());
+
+        let source = RegistrySource::Remote {
+            url: entry.url.clone(),
+            checkout: target,
+        };
+
+        if cache_enabled && let Some(idx) = cache::load(&source, cache_ttl) {
+            merged.merge(idx);
+            continue;
+        }
+
+        match index::load_index(&path) {
+            Ok(idx) => {
+                if cache_enabled {
+                    cache::write(&source, &idx);
+                }
+                merged.merge(idx);
+            }
+            Err(e) => {
+                tracing::warn!(
+                    repo = %repo_name,
+                    error = %e,
+                    "Failed to load repo index, skipping"
+                );
+            }
+        }
+    }
 }
 
 /// Identify a registry for manifest entries.
