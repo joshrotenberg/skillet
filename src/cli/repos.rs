@@ -1,45 +1,32 @@
 use std::process::ExitCode;
 
-use skillet_mcp::{config, registry, repo};
+use skillet_mcp::registry::{self, cache_dir_for_url, default_cache_dir};
+use skillet_mcp::{git, repo};
 
 use crate::ReposArgs;
 
 /// Run the `repos` subcommand.
-pub(crate) fn run_repos(args: ReposArgs) -> ExitCode {
-    let mut cli_config = match config::load_config() {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("Error loading config: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    if args.no_cache {
-        cli_config.cache.enabled = false;
+pub(crate) fn run_repos(_args: ReposArgs) -> ExitCode {
+    // Always clone/pull the official registry to load the catalog.
+    // This is independent of the user's configured registries -- the
+    // catalog lives in the official repo.
+    let cache_base = default_cache_dir();
+    let target = cache_dir_for_url(&cache_base, registry::DEFAULT_REGISTRY_URL);
+    if let Some(parent) = target.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Err(e) = git::clone_or_pull(registry::DEFAULT_REGISTRY_URL, &target) {
+        eprintln!("Error loading official registry: {e}");
+        return ExitCode::from(1);
     }
 
-    // Load the official registry to get the catalog
-    let (_, registry_paths) =
-        match registry::load_registries(&[], &[], &cli_config, args.subdir.as_deref()) {
-            Ok(r) => r,
-            Err(e) => {
-                eprintln!("Error loading registries: {e}");
-                return ExitCode::from(1);
-            }
-        };
-
-    // Load catalog from the first registry path
-    let catalog = if let Some(path) = registry_paths.first() {
-        match repo::load_repos_catalog(path) {
-            Ok(c) => c,
-            Err(e) => {
-                eprintln!("Error loading repo catalog: {e}");
-                return ExitCode::from(1);
-            }
+    let registry_path = target.join(registry::DEFAULT_REGISTRY_SUBDIR);
+    let catalog = match repo::load_repos_catalog(&registry_path) {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("Error loading repo catalog: {e}");
+            return ExitCode::from(1);
         }
-    } else {
-        eprintln!("No registry loaded, cannot read repo catalog.");
-        return ExitCode::from(1);
     };
 
     if catalog.is_empty() {

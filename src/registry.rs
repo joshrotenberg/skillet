@@ -382,9 +382,24 @@ pub fn load_registries_with_repos(
         merged.merge(idx);
     }
 
-    // Load repo catalog from the official registry
+    // Load repo catalog from the official registry.
+    // If the official registry was already cloned (because it's in the URL
+    // list), use that path. Otherwise, clone it separately when we need the
+    // catalog to resolve repo short names.
+    let has_repos = !repo_flags.is_empty() || !config.registries.repos.is_empty();
     let catalog = if let Some(ref root) = official_registry_root {
         crate::repo::load_repos_catalog(root).unwrap_or_default()
+    } else if has_repos {
+        let target = cache_dir_for_url(&cache_base, DEFAULT_REGISTRY_URL);
+        if let Some(parent) = target.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if git::clone_or_pull(DEFAULT_REGISTRY_URL, &target).is_ok() {
+            let path = target.join(DEFAULT_REGISTRY_SUBDIR);
+            crate::repo::load_repos_catalog(&path).unwrap_or_default()
+        } else {
+            RepoCatalog::default()
+        }
     } else {
         RepoCatalog::default()
     };
