@@ -134,10 +134,9 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, registry_paths, _catalog) = match registry::load_registries_with_repos(
+    let (skill_index, registry_paths) = match registry::load_registries(
         &args.registries.registry,
         &args.registries.remote,
-        &args.registries.repo,
         &cli_config,
         args.registries.subdir.as_deref(),
     ) {

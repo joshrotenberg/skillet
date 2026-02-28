@@ -7,7 +7,6 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
-use crate::repo::RepoCatalog;
 use crate::search::SkillSearch;
 
 /// Shared state for the MCP server
@@ -22,8 +21,6 @@ pub struct AppState {
     pub remote_urls: Vec<String>,
     /// Registry configuration (from skillet.toml or defaults)
     pub config: RegistryConfig,
-    /// Curated repo catalog loaded from the official registry
-    pub repos: RepoCatalog,
 }
 
 impl AppState {
@@ -33,7 +30,6 @@ impl AppState {
         index: SkillIndex,
         search: SkillSearch,
         config: RegistryConfig,
-        repos: RepoCatalog,
     ) -> Arc<Self> {
         Arc::new(Self {
             index: RwLock::new(index),
@@ -41,26 +37,7 @@ impl AppState {
             registry_paths,
             remote_urls,
             config,
-            repos,
         })
-    }
-
-    /// Convenience constructor for tests: defaults `remote_urls` and `repos`.
-    #[doc(hidden)]
-    pub fn new_test(
-        registry_paths: Vec<PathBuf>,
-        index: SkillIndex,
-        search: SkillSearch,
-        config: RegistryConfig,
-    ) -> Arc<Self> {
-        Self::new(
-            registry_paths,
-            Vec::new(),
-            index,
-            search,
-            config,
-            RepoCatalog::default(),
-        )
     }
 }
 

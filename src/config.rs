@@ -129,8 +129,6 @@ impl Default for InstallConfig {
 pub struct RegistriesConfig {
     pub local: Vec<PathBuf>,
     pub remote: Vec<String>,
-    /// Short names resolved from the repo catalog (e.g. `anthropics/skills`).
-    pub repos: Vec<String>,
 }
 
 /// An agent platform to install skills into.
@@ -294,16 +292,6 @@ pub fn generate_default_config(
     local: Vec<PathBuf>,
     target: &str,
 ) -> crate::error::Result<SkilletConfig> {
-    generate_default_config_with_repos(remotes, local, Vec::new(), target)
-}
-
-/// Build a default `SkilletConfig` with repo short names.
-pub fn generate_default_config_with_repos(
-    remotes: Vec<String>,
-    local: Vec<PathBuf>,
-    repos: Vec<String>,
-    target: &str,
-) -> crate::error::Result<SkilletConfig> {
     // Validate the target string (allows "all" or any known target)
     let _ = InstallTarget::parse(target)?;
 
@@ -315,7 +303,6 @@ pub fn generate_default_config_with_repos(
         registries: RegistriesConfig {
             local,
             remote: remotes,
-            repos,
         },
         ..Default::default()
     })

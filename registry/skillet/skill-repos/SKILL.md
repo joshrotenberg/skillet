@@ -13,23 +13,25 @@ zero-config discovery handles them.
 ### How to add a repo
 
 ```bash
-# By short name (preferred)
-skillet search react --repo vercel-labs/agent-skills
-
-# In config (persistent)
-# Add to ~/.config/skillet/config.toml:
-[registries]
-repos = ["anthropics/skills", "vercel-labs/agent-skills"]
-
-# Or via setup:
-skillet setup --repos anthropics/skills,vercel-labs/agent-skills
-
-# By raw URL (escape hatch)
+# As a CLI flag (one-time)
 skillet search react --remote https://github.com/vercel-labs/agent-skills.git --subdir skills
+
+# In MCP server config (persistent)
+{
+  "mcpServers": {
+    "skillet": {
+      "command": "skillet",
+      "args": [
+        "--remote", "https://github.com/vercel-labs/agent-skills.git",
+        "--subdir", "skills"
+      ]
+    }
+  }
+}
 ```
 
-The short-name approach uses the repo catalog (`repos.toml`) in the
-official registry. Run `skillet repos` to see all available repos.
+Most repos below use `--subdir skills` because the convention is to put
+skills under a `skills/` directory.
 
 ### When to suggest adding a repo
 

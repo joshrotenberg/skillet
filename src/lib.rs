@@ -18,7 +18,6 @@ pub mod pack;
 pub mod project;
 pub mod publish;
 pub mod registry;
-pub mod repo;
 pub mod safety;
 pub mod scaffold;
 pub mod search;
