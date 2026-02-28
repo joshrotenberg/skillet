@@ -183,6 +183,65 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
         }
     }
 
+    // Flat-repo fallback: external repos (Anthropic, Vercel, etc.) use a flat
+    // `skill-name/SKILL.md` layout without owner nesting.  When the traditional
+    // owner/name walk found nothing, try treating immediate children as skills
+    // and infer the owner from the git remote (or fall back to the directory name).
+    if index.skills.is_empty() {
+        let flat_skills = find_skill_dirs(registry_path, 0);
+        if !flat_skills.is_empty() {
+            // Walk up from registry_path to find the git root (handles subdir case)
+            let git_root = find_git_root(registry_path).unwrap_or(registry_path.to_path_buf());
+            let owner = project::owner_from_git_remote(&git_root).unwrap_or_else(|| {
+                registry_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+            tracing::info!(
+                owner = %owner,
+                count = flat_skills.len(),
+                "Flat-repo fallback: loading skills without owner nesting"
+            );
+
+            for skill_dir in flat_skills {
+                let skill_name = skill_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                match load_skill(&owner, &skill_name, &skill_dir) {
+                    Ok(mut entry) => {
+                        let key = (owner.clone(), skill_name.clone());
+                        if index.skills.contains_key(&key) {
+                            continue;
+                        }
+                        if let Some(v) = entry.latest()
+                            && let Some(ref c) = v.metadata.skill.classification
+                        {
+                            for cat in &c.categories {
+                                *index.categories.entry(cat.clone()).or_insert(0) += 1;
+                            }
+                        }
+                        entry.source = SkillSource::Registry;
+                        index.skills.insert(key, entry);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            owner = %owner,
+                            skill = %skill_name,
+                            error = %e,
+                            "Flat fallback: skipping skill with invalid metadata"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     tracing::info!(
         skills = index.skills.len(),
         categories = index.categories.len(),
@@ -190,6 +249,19 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     );
 
     Ok(index)
+}
+
+/// Walk up from a path to find the nearest directory containing `.git`.
+fn find_git_root(start: &Path) -> Option<PathBuf> {
+    let mut current = start.to_path_buf();
+    loop {
+        if current.join(".git").exists() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
 }
 
 /// Recursively find skill directories (those containing `skill.toml` or `SKILL.md`).
@@ -1389,6 +1461,135 @@ path = "skills"
             index.categories.contains_key("database"),
             "database category from manifest should be indexed: {:?}",
             index.categories
+        );
+    }
+
+    #[test]
+    fn test_load_index_flat_repo_fallback() {
+        // Flat layout without git: owner inferred from directory name
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("anthropics");
+        std::fs::create_dir_all(&root).unwrap();
+
+        // skill-a/SKILL.md
+        let skill_a = root.join("skill-a");
+        std::fs::create_dir_all(&skill_a).unwrap();
+        std::fs::write(skill_a.join("SKILL.md"), "# Skill A\n\nA useful skill.\n").unwrap();
+
+        // skill-b/SKILL.md
+        let skill_b = root.join("skill-b");
+        std::fs::create_dir_all(&skill_b).unwrap();
+        std::fs::write(skill_b.join("SKILL.md"), "# Skill B\n\nAnother skill.\n").unwrap();
+
+        let index = load_index(&root).expect("should load flat repo");
+        assert_eq!(index.skills.len(), 2, "should find both flat skills");
+
+        // Owner comes from directory name since there's no git remote
+        assert!(
+            index
+                .skills
+                .contains_key(&("anthropics".to_string(), "skill-a".to_string())),
+            "skill-a should use dir name as owner"
+        );
+        assert!(
+            index
+                .skills
+                .contains_key(&("anthropics".to_string(), "skill-b".to_string())),
+            "skill-b should use dir name as owner"
+        );
+
+        // Verify content was loaded
+        let entry = &index.skills[&("anthropics".to_string(), "skill-a".to_string())];
+        let latest = entry.latest().expect("should have latest");
+        assert!(latest.skill_md.contains("Skill A"));
+    }
+
+    #[test]
+    fn test_load_index_flat_repo_with_git_remote() {
+        // Flat layout inside a git repo: owner inferred from remote URL
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // Initialize a git repo with a remote
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(root)
+            .output()
+            .expect("git init");
+        std::process::Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/vercel-labs/agent-skills.git",
+            ])
+            .current_dir(root)
+            .output()
+            .expect("git remote add");
+
+        // Create flat skills
+        let skill = root.join("react-patterns");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "# React Patterns\n\nReact best practices.\n",
+        )
+        .unwrap();
+
+        let index = load_index(root).expect("should load flat repo with git remote");
+        assert_eq!(index.skills.len(), 1);
+        assert!(
+            index
+                .skills
+                .contains_key(&("vercel-labs".to_string(), "react-patterns".to_string())),
+            "owner should come from git remote"
+        );
+    }
+
+    #[test]
+    fn test_load_index_flat_repo_in_subdir() {
+        // Skills in a subdirectory (simulates subdir = "skills" in repos.toml)
+        // with git remote accessible from the parent
+        let tmp = tempfile::tempdir().unwrap();
+        let git_root = tmp.path();
+
+        // Initialize git repo at the top level
+        std::process::Command::new("git")
+            .args(["init"])
+            .current_dir(git_root)
+            .output()
+            .expect("git init");
+        std::process::Command::new("git")
+            .args([
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/firebase/agent-skills.git",
+            ])
+            .current_dir(git_root)
+            .output()
+            .expect("git remote add");
+
+        // Skills live in a subdirectory
+        let skills_dir = git_root.join("skills");
+        std::fs::create_dir_all(&skills_dir).unwrap();
+
+        let skill = skills_dir.join("firestore-queries");
+        std::fs::create_dir_all(&skill).unwrap();
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "# Firestore Queries\n\nQuery Firestore.\n",
+        )
+        .unwrap();
+
+        // load_index is called with the subdirectory (as registry.rs does)
+        let index = load_index(&skills_dir).expect("should load flat repo from subdir");
+        assert_eq!(index.skills.len(), 1);
+        assert!(
+            index
+                .skills
+                .contains_key(&("firebase".to_string(), "firestore-queries".to_string())),
+            "owner should come from git remote of parent repo"
         );
     }
 }
