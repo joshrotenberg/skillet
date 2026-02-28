@@ -44,6 +44,24 @@ impl AppState {
             repos,
         })
     }
+
+    /// Convenience constructor for tests: defaults `remote_urls` and `repos`.
+    #[doc(hidden)]
+    pub fn new_test(
+        registry_paths: Vec<PathBuf>,
+        index: SkillIndex,
+        search: SkillSearch,
+        config: RegistryConfig,
+    ) -> Arc<Self> {
+        Self::new(
+            registry_paths,
+            Vec::new(),
+            index,
+            search,
+            config,
+            RepoCatalog::default(),
+        )
+    }
 }
 
 /// Top-level registry configuration, parsed from `skillet.toml`.

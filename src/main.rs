@@ -21,8 +21,6 @@ use skillet_mcp::cache::{self, RegistrySource};
 use skillet_mcp::config;
 use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::repo;
-#[cfg(test)]
-use skillet_mcp::repo::RepoCatalog;
 use skillet_mcp::state::AppState;
 use skillet_mcp::{discover, git, index, registry, search, state};
 
@@ -831,37 +829,21 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     // Resolve repos from config
     let cli_repos = &cli_config.registries.repos;
     if !cli_repos.is_empty() {
-        let cache_base_repos = args.cache_dir.clone().unwrap_or_else(default_cache_dir);
-        for repo_name in cli_repos {
-            if let Some(entry) = repos_catalog.find(repo_name) {
-                let target = cache_dir_for_url(&cache_base_repos, &entry.url);
-                if let Some(parent) = target.parent() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
-                if let Err(e) = git::clone_or_pull(&entry.url, &target) {
-                    tracing::warn!(repo = %repo_name, error = %e, "Failed to clone repo, skipping");
-                    continue;
-                }
-                let path = match &entry.subdir {
-                    Some(sub) => target.join(sub),
-                    None => target.clone(),
-                };
-                tracing::info!(repo = %repo_name, path = %path.display(), "Adding catalog repo");
-                registry_paths.push(path.clone());
-                match index::load_index(&path) {
-                    Ok(idx) => merged_index.merge(idx),
-                    Err(e) => {
-                        tracing::warn!(
-                            repo = %repo_name,
-                            error = %e,
-                            "Failed to load repo index, skipping"
-                        );
-                    }
-                }
-            } else {
-                tracing::warn!(repo = %repo_name, "Unknown repo in catalog, skipping");
-            }
-        }
+        let repo_names: Vec<&str> = cli_repos.iter().map(|s| s.as_str()).collect();
+        let cache_ttl = if cli_config.cache.enabled {
+            parse_duration(&cli_config.cache.ttl).unwrap_or(Duration::from_secs(300))
+        } else {
+            Duration::ZERO
+        };
+        registry::resolve_repos(
+            &repo_names,
+            &repos_catalog,
+            &cache_base,
+            cli_config.cache.enabled,
+            cache_ttl,
+            &mut merged_index,
+            &mut registry_paths,
+        );
     }
 
     let skill_search = search::SkillSearch::build(&merged_index);
@@ -1181,14 +1163,7 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1809,14 +1784,7 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1914,14 +1882,7 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -1989,14 +1950,7 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -2028,14 +1982,7 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         // Only include search, not info
         let caps = ServerCapabilities {
             tools: ["search"].iter().map(|&s| s.to_string()).collect(),
@@ -2412,14 +2359,7 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ["search", "categories"]
                 .iter()
@@ -2618,14 +2558,7 @@ mod tests {
         let config = index::load_config(&registry_path).expect("load config");
         let skill_index = index::load_index(&registry_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ["search"].iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -2962,14 +2895,7 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -3042,14 +2968,7 @@ mod tests {
         );
 
         let skill_search = search::SkillSearch::build(&skill_index);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            skill_index,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], skill_index, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -3138,14 +3057,7 @@ mod tests {
         merged.merge(local_index);
 
         let skill_search = search::SkillSearch::build(&merged);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            merged,
-            skill_search,
-            config,
-            RepoCatalog::default(),
-        );
+        let state = AppState::new_test(vec![registry_path], merged, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
