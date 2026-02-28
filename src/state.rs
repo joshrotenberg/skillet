@@ -19,7 +19,7 @@ pub struct AppState {
     pub registry_paths: Vec<PathBuf>,
     /// Remote URLs (for cache key generation)
     pub remote_urls: Vec<String>,
-    /// Registry configuration (from config.toml or defaults)
+    /// Registry configuration (from skillet.toml or defaults)
     pub config: RegistryConfig,
 }
 
@@ -41,7 +41,7 @@ impl AppState {
     }
 }
 
-/// Top-level registry configuration, parsed from `config.toml`.
+/// Top-level registry configuration, parsed from `skillet.toml`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistryConfig {
     pub registry: RegistryInfo,

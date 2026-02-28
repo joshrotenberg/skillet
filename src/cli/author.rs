@@ -242,7 +242,7 @@ pub(crate) fn run_init_registry(args: InitRegistryArgs) -> ExitCode {
         })
         .unwrap_or_else(|| "my-skills".to_string());
 
-    if let Err(e) = registry::init_registry(path, &name, args.description.as_deref(), args.legacy) {
+    if let Err(e) = registry::init_registry(path, &name, args.description.as_deref()) {
         eprintln!("Error: {e}");
         return ExitCode::from(1);
     }
