@@ -155,10 +155,6 @@ struct InitRegistryArgs {
     /// Registry description
     #[arg(long)]
     description: Option<String>,
-
-    /// Generate legacy config.toml instead of skillet.toml
-    #[arg(long)]
-    legacy: bool,
 }
 
 #[derive(clap::Args, Debug)]

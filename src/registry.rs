@@ -80,13 +80,11 @@ pub fn default_cache_dir() -> PathBuf {
 /// included in the config. Maintainer info is auto-populated from the
 /// user's git config when available.
 ///
-/// When `use_legacy` is `true`, generates a `config.toml` (old format).
-/// Otherwise generates a `skillet.toml` with a `[registry]` section.
+/// Generates a `skillet.toml` with a `[registry]` section.
 pub fn init_registry(
     path: &Path,
     name: &str,
     description: Option<&str>,
-    use_legacy: bool,
 ) -> crate::error::Result<()> {
     std::fs::create_dir_all(path)?;
 
@@ -135,12 +133,7 @@ pub fn init_registry(
         }
     }
 
-    let config_filename = if use_legacy {
-        "config.toml"
-    } else {
-        "skillet.toml"
-    };
-    std::fs::write(path.join(config_filename), config)?;
+    std::fs::write(path.join("skillet.toml"), config)?;
 
     // README.md
     let readme = format!(
@@ -431,7 +424,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let registry_path = dir.path().join("my-registry");
 
-        init_registry(&registry_path, "my-registry", None, false).unwrap();
+        init_registry(&registry_path, "my-registry", None).unwrap();
 
         // skillet.toml exists with correct name (new default)
         let config = std::fs::read_to_string(registry_path.join("skillet.toml")).unwrap();
@@ -460,23 +453,6 @@ mod tests {
     }
 
     #[test]
-    fn test_init_registry_legacy() {
-        let dir = tempfile::tempdir().unwrap();
-        let registry_path = dir.path().join("legacy-registry");
-
-        init_registry(&registry_path, "legacy-registry", None, true).unwrap();
-
-        // config.toml exists (legacy format)
-        let config = std::fs::read_to_string(registry_path.join("config.toml")).unwrap();
-        assert!(config.contains("name = \"legacy-registry\""));
-        assert!(!registry_path.join("skillet.toml").exists());
-
-        // Can be loaded
-        let loaded_config = crate::index::load_config(&registry_path).unwrap();
-        assert_eq!(loaded_config.registry.name, "legacy-registry");
-    }
-
-    #[test]
     fn test_init_registry_with_description() {
         let dir = tempfile::tempdir().unwrap();
         let registry_path = dir.path().join("desc-registry");
@@ -485,7 +461,6 @@ mod tests {
             &registry_path,
             "desc-registry",
             Some("A test registry with skills"),
-            false,
         )
         .unwrap();
 

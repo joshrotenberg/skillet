@@ -2,8 +2,8 @@
 //!
 //! A `skillet.toml` file is a unified manifest that can describe a project,
 //! a single inline skill, a multi-skill directory, a registry, or any
-//! combination. It replaces the registry `config.toml` and enables embedding
-//! skills in any repository with zero configuration beyond a SKILL.md file.
+//! combination. It enables embedding skills in any repository with zero
+//! configuration beyond a SKILL.md file.
 
 use std::path::{Path, PathBuf};
 
@@ -29,7 +29,7 @@ pub struct SkilletToml {
     #[serde(default)]
     pub skills: Option<SkillsSection>,
 
-    /// Registry configuration (replaces legacy `config.toml`)
+    /// Registry configuration
     #[serde(default)]
     pub registry: Option<RegistrySection>,
 }
@@ -142,9 +142,8 @@ impl SkillsSection {
 
 /// Registry section, matching the existing `RegistryConfig` structure.
 ///
-/// This replaces the legacy `config.toml` at registry root. The field names
-/// mirror `state::RegistryInfo` so that existing registry loading works
-/// transparently.
+/// The field names mirror `state::RegistryInfo` so that existing registry
+/// loading works transparently.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RegistrySection {
     /// Registry name
@@ -161,6 +160,14 @@ pub struct RegistrySection {
     /// Maintainer information
     #[serde(default)]
     pub maintainer: Option<crate::state::RegistryMaintainer>,
+
+    /// URL endpoints for non-git-backed registries
+    #[serde(default)]
+    pub urls: Option<crate::state::RegistryUrls>,
+
+    /// Auth configuration
+    #[serde(default)]
+    pub auth: Option<crate::state::RegistryAuth>,
 
     /// Suggested companion registries
     #[serde(default)]
@@ -214,8 +221,8 @@ impl SkilletToml {
                 version: reg.version,
                 description: reg.description.clone(),
                 maintainer: reg.maintainer.clone(),
-                urls: None,
-                auth: None,
+                urls: reg.urls.clone(),
+                auth: reg.auth.clone(),
                 suggests: reg.suggests.clone(),
                 defaults: reg.defaults.clone(),
             },

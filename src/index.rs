@@ -23,11 +23,10 @@ const MAX_NESTING_DEPTH: usize = 5;
 
 /// Load registry configuration from the registry root.
 ///
-/// Checks for `skillet.toml` with a `[registry]` section first, then falls
-/// back to the legacy `config.toml`. If neither is present, returns sensible
-/// defaults. If a file exists but is malformed, returns an error.
+/// Looks for `skillet.toml` with a `[registry]` section. If not present,
+/// returns sensible defaults. If the file exists but is malformed, returns
+/// an error.
 pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig> {
-    // Try skillet.toml [registry] first
     if let Some(manifest) = project::load_skillet_toml(registry_path)?
         && let Some(config) = manifest.into_registry_config()
     {
@@ -35,24 +34,8 @@ pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig>
         return Ok(config);
     }
 
-    // Fall back to legacy config.toml
-    let config_path = registry_path.join("config.toml");
-    if !config_path.is_file() {
-        tracing::debug!("No config.toml or skillet.toml [registry] found, using defaults");
-        return Ok(RegistryConfig::default());
-    }
-
-    let raw = std::fs::read_to_string(&config_path).map_err(|e| Error::FileRead {
-        path: config_path.clone(),
-        source: e,
-    })?;
-    let config: RegistryConfig = toml::from_str(&raw).map_err(|e| Error::TomlParse {
-        path: config_path.clone(),
-        source: e,
-    })?;
-
-    tracing::info!(name = %config.registry.name, "Loaded registry config from config.toml");
-    Ok(config)
+    tracing::debug!("No skillet.toml [registry] found, using defaults");
+    Ok(RegistryConfig::default())
 }
 
 /// Load a skill index from a registry directory.
@@ -760,7 +743,7 @@ published = "2026-01-01T00:00:00Z"
     fn test_load_config_with_full_fields() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
-            tmp.path().join("config.toml"),
+            tmp.path().join("skillet.toml"),
             r#"
 [registry]
 name = "my-private-registry"
@@ -788,7 +771,11 @@ required = true
     #[test]
     fn test_load_config_malformed_fails() {
         let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("config.toml"), "this is not valid toml {{{").unwrap();
+        std::fs::write(
+            tmp.path().join("skillet.toml"),
+            "this is not valid toml {{{",
+        )
+        .unwrap();
 
         let result = load_config(tmp.path());
         assert!(result.is_err());
@@ -798,7 +785,7 @@ required = true
     fn test_load_config_with_all_extended_fields() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
-            tmp.path().join("config.toml"),
+            tmp.path().join("skillet.toml"),
             r#"
 [registry]
 name = "acme-team-skills"
@@ -863,7 +850,7 @@ refresh_interval = "10m"
     fn test_load_config_with_partial_extended_fields() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
-            tmp.path().join("config.toml"),
+            tmp.path().join("skillet.toml"),
             r#"
 [registry]
 name = "minimal-plus"
@@ -885,16 +872,16 @@ description = "Just a description, nothing else new"
     }
 
     #[test]
-    fn test_load_config_backward_compat_minimal() {
+    fn test_load_config_minimal() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
-            tmp.path().join("config.toml"),
-            "[registry]\nname = \"old-style\"\nversion = 1\n",
+            tmp.path().join("skillet.toml"),
+            "[registry]\nname = \"minimal\"\nversion = 1\n",
         )
         .unwrap();
 
         let config = load_config(tmp.path()).expect("Failed to parse minimal config");
-        assert_eq!(config.registry.name, "old-style");
+        assert_eq!(config.registry.name, "minimal");
         assert_eq!(config.registry.version, 1);
         assert!(config.registry.description.is_none());
         assert!(config.registry.maintainer.is_none());
@@ -911,7 +898,6 @@ description = "Just a description, nothing else new"
             &registry_path,
             "described-registry",
             Some("A test registry with a description"),
-            false,
         )
         .unwrap();
 

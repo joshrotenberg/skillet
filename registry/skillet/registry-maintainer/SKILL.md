@@ -13,11 +13,10 @@ Anyone can create one. Skillet is the tool, registries are data.
 ```bash
 skillet init-registry path/to/my-registry
 skillet init-registry path/to/my-registry --name "My Registry" --description "Team skills"
-skillet init-registry path/to/my-registry --legacy   # generates config.toml instead of skillet.toml
 ```
 
 This creates a git repo with:
-- `skillet.toml` (or `config.toml` with `--legacy`) -- registry metadata
+- `skillet.toml` -- registry metadata
 - `README.md` -- instructions for contributors
 - `.gitignore`
 - An initial commit
@@ -64,8 +63,6 @@ description = "Official community skills"
 [registry.defaults]
 refresh_interval = "10m"
 ```
-
-**config.toml** (legacy format): same `[registry]` section, different filename.
 
 ### Accepting PRs
 

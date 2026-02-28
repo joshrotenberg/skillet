@@ -591,7 +591,7 @@ fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, descri
 
 fn write_registry_config(registry: &std::path::Path, name: &str) {
     let config = format!("[registry]\nname = \"{name}\"\n");
-    std::fs::write(registry.join("config.toml"), config).expect("write config.toml");
+    std::fs::write(registry.join("skillet.toml"), config).expect("write skillet.toml");
 }
 
 // ── Publish workflow (#143) ──────────────────────────────────────
