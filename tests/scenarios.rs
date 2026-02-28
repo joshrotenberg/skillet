@@ -18,6 +18,10 @@ fn test_npm_registry() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
 }
 
+fn official_registry() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("registry")
+}
+
 #[allow(deprecated)]
 fn skillet() -> Command {
     Command::cargo_bin("skillet").expect("binary exists")
@@ -1139,5 +1143,68 @@ fn scenario_npm_repo_compatibility() {
     assert!(
         vs_dir.join("references/embedding-guide.md").exists(),
         "references/embedding-guide.md should exist"
+    );
+}
+
+// ── Official registry dogfood (#151) ──────────────────────────────
+
+/// search -> info -> install from the in-repo official registry
+#[test]
+fn scenario_official_registry_dogfood() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Step 1: Search finds all official skills
+    let search_output = skillet()
+        .args(["search", "*", "--registry"])
+        .arg(official_registry())
+        .output()
+        .expect("search");
+    let search_stdout = String::from_utf8_lossy(&search_output.stdout);
+    assert!(
+        search_stdout.contains("skillet/user"),
+        "search should find skillet/user: {search_stdout}"
+    );
+    assert!(
+        search_stdout.contains("skillet/skill-author"),
+        "search should find skillet/skill-author: {search_stdout}"
+    );
+    assert!(
+        search_stdout.contains("skillet/contributor"),
+        "search should find skillet/contributor: {search_stdout}"
+    );
+
+    // Step 2: Info on a specific skill
+    skillet()
+        .args(["info", "skillet/user", "--registry"])
+        .arg(official_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("skillet/user")
+                .and(predicate::str::contains("version"))
+                .and(predicate::str::contains("description")),
+        );
+
+    // Step 3: Install a skill
+    skillet()
+        .args(["install", "skillet/user", "--registry"])
+        .arg(official_registry())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Installed skillet/user"));
+
+    // Step 4: Verify installed content
+    let installed_md = std::fs::read_to_string(tmp.path().join(".agents/skills/user/SKILL.md"))
+        .expect("read installed SKILL.md");
+    let registry_md = std::fs::read_to_string(official_registry().join("skillet/user/SKILL.md"))
+        .expect("read registry SKILL.md");
+    assert_eq!(
+        installed_md, registry_md,
+        "installed SKILL.md should match registry content"
     );
 }

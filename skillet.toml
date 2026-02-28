@@ -1,0 +1,13 @@
+[project]
+name = "skillet"
+description = "MCP-native skill registry for AI agents"
+license = "MIT OR Apache-2.0"
+categories = ["tools", "skills"]
+tags = ["mcp", "skills", "ai-agents", "registry"]
+
+[[project.authors]]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skills]
+path = "registry"

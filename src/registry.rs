@@ -10,7 +10,10 @@ use crate::state::SkillIndex;
 use crate::{git, index};
 
 /// The official default registry, used when no registries are configured.
-pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet-registry.git";
+pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet.git";
+
+/// Subdirectory within the official registry repo that contains skills.
+pub const DEFAULT_REGISTRY_SUBDIR: &str = "registry";
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
 pub fn parse_duration(s: &str) -> crate::error::Result<Duration> {
@@ -340,6 +343,7 @@ pub fn load_registries(
         git::clone_or_pull(url, &target)?;
         let path = match subdir {
             Some(sub) => target.join(sub),
+            None if *url == DEFAULT_REGISTRY_URL => target.join(DEFAULT_REGISTRY_SUBDIR),
             None => target.clone(),
         };
         registry_paths.push(path.clone());

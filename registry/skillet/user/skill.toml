@@ -1,0 +1,23 @@
+[skill]
+name = "user"
+owner = "skillet"
+version = "2026.02.27"
+description = "Using skillet as a skill consumer: searching, installing, and managing skills"
+trigger = "Use when the user wants to search for skills, install skills, configure skillet, or manage their skill library"
+license = "MIT OR Apache-2.0"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["tools", "configuration"]
+tags = ["skillet", "skills", "mcp", "install", "search", "registry"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_capabilities = ["shell_exec", "file_read", "file_write"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

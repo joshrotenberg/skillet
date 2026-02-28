@@ -1,0 +1,23 @@
+[skill]
+name = "contributor"
+owner = "skillet"
+version = "2026.02.27"
+description = "Contributing to skillet: architecture, development setup, testing, and PR workflow"
+trigger = "Use when the user wants to contribute to skillet, understand its architecture, or run its test suite"
+license = "MIT OR Apache-2.0"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["development", "tools"]
+tags = ["skillet", "contributing", "rust", "architecture", "testing"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 8192
+required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

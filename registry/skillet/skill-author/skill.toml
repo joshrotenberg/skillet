@@ -1,0 +1,23 @@
+[skill]
+name = "skill-author"
+owner = "skillet"
+version = "2026.02.27"
+description = "Authoring and publishing skills: format, validation, packing, and publishing workflow"
+trigger = "Use when the user wants to create a new skill, validate a skillpack, or publish a skill to a registry"
+license = "MIT OR Apache-2.0"
+
+[skill.author]
+name = "Josh Rotenberg"
+github = "joshrotenberg"
+
+[skill.classification]
+categories = ["tools", "development"]
+tags = ["skillet", "skills", "authoring", "publishing", "validate", "pack"]
+
+[skill.compatibility]
+requires_tool_use = true
+requires_vision = false
+min_context_tokens = 4096
+required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
+required_mcp_servers = []
+verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]

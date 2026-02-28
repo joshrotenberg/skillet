@@ -16,6 +16,10 @@ fn test_npm_registry() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
 }
 
+fn official_registry() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("registry")
+}
+
 #[allow(deprecated)] // cargo_bin_cmd! macro has compile-time issues; cargo_bin works fine
 fn skillet() -> Command {
     Command::cargo_bin("skillet").expect("binary exists")
@@ -570,7 +574,7 @@ fn setup_no_official_registry() {
     let content =
         std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
     assert!(
-        !content.contains("skillet-registry"),
+        !content.contains("joshrotenberg/skillet.git"),
         "config should NOT contain official registry URL: {content}"
     );
 }
@@ -1154,4 +1158,35 @@ fn trust_list_registries_only() {
         .assert()
         .success()
         .stdout(predicate::str::contains("https://example.com/repo.git"));
+}
+
+// ── Official registry (in-repo) ──────────────────────────────────
+
+#[test]
+fn search_official_registry() {
+    skillet()
+        .args(["search", "*", "--registry"])
+        .arg(official_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("skillet/user")
+                .and(predicate::str::contains("skillet/skill-author"))
+                .and(predicate::str::contains("skillet/setup")),
+        );
+}
+
+#[test]
+fn info_official_skill() {
+    skillet()
+        .args(["info", "skillet/user", "--registry"])
+        .arg(official_registry())
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("skillet/user")
+                .and(predicate::str::contains("version"))
+                .and(predicate::str::contains("description"))
+                .and(predicate::str::contains("consumer")),
+        );
 }
