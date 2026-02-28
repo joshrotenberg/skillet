@@ -2561,4 +2561,530 @@ mod tests {
         assert!(!names.contains(&"compare_skills"));
         assert!(!names.contains(&"skill_status"));
     }
+
+    // ── validate_skill tool tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_validate_skill_valid() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let path = test_registry_path()
+            .join("joshrotenberg/rust-dev")
+            .display()
+            .to_string();
+        let result = client
+            .call_tool("validate_skill", serde_json::json!({"path": path}))
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("Validation passed"),
+            "should pass validation: {text}"
+        );
+        assert!(
+            text.contains("joshrotenberg/rust-dev"),
+            "should show owner/name: {text}"
+        );
+        assert!(
+            text.contains("**SKILL.md**: ok"),
+            "should show SKILL.md ok: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_validate_skill_nonexistent_path() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "validate_skill",
+                serde_json::json!({"path": "/tmp/nonexistent-skill-xyzzy-12345"}),
+            )
+            .await;
+
+        assert!(result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("error") || text.contains("Error"),
+            "should report error: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_validate_skill_unsafe() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let path = test_registry_path()
+            .join("acme/unsafe-demo")
+            .display()
+            .to_string();
+        let result = client
+            .call_tool("validate_skill", serde_json::json!({"path": path}))
+            .await;
+
+        // validate_skill returns the safety report as text, not as an error
+        let text = result.all_text();
+        assert!(
+            text.contains("Safety scan") || text.contains("safety issues"),
+            "should report safety issues: {text}"
+        );
+        assert!(
+            text.contains("danger") || text.contains("Danger"),
+            "should show danger findings: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_validate_skill_skip_safety() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let path = test_registry_path()
+            .join("acme/unsafe-demo")
+            .display()
+            .to_string();
+        let result = client
+            .call_tool(
+                "validate_skill",
+                serde_json::json!({"path": path, "skip_safety": true}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("Validation passed"),
+            "should pass when safety skipped: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_validate_skill_with_extra_files() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let path = test_registry_path()
+            .join("acme/python-dev")
+            .display()
+            .to_string();
+        let result = client
+            .call_tool("validate_skill", serde_json::json!({"path": path}))
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("extra files"),
+            "should list extra files: {text}"
+        );
+        assert!(
+            text.contains("scripts/lint.sh"),
+            "should mention lint.sh: {text}"
+        );
+    }
+
+    // ── list_installed tool tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_list_installed_empty() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool("list_installed", serde_json::json!({}))
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("No skills installed") || text.contains("Installed Skills"),
+            "should handle empty state: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_list_installed_with_owner_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "list_installed",
+                serde_json::json!({"owner": "nonexistent_owner"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("No installed skills from"),
+            "should report no skills from owner: {text}"
+        );
+    }
+
+    // ── audit_skills tool tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_audit_skills_no_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool("audit_skills", serde_json::json!({}))
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        // May find real installed skills or report none -- either is valid
+        assert!(
+            text.contains("Audit Results") || text.contains("No installed skills to audit"),
+            "should run audit: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_audit_skills_with_filter() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        let result = client
+            .call_tool(
+                "audit_skills",
+                serde_json::json!({"owner": "nonexistent", "name": "no-skill"}),
+            )
+            .await;
+
+        assert!(!result.is_error);
+        let text = result.all_text();
+        assert!(
+            text.contains("No installed skills to audit"),
+            "should find nothing to audit: {text}"
+        );
+    }
+
+    // ── setup_config tool tests ──────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_setup_config_already_exists() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // setup_config checks ~/.config/skillet/config.toml.
+        // If it exists (likely in dev), it should report already exists.
+        // If it doesn't exist, it would create one. Either way, not an error.
+        let result = client
+            .call_tool("setup_config", serde_json::json!({}))
+            .await;
+
+        // Should not be a hard error -- either creates config or says it exists
+        let text = result.all_text();
+        assert!(
+            text.contains("config") || text.contains("Config"),
+            "should mention config: {text}"
+        );
+    }
+
+    // ── Resource edge case tests ─────────────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_read_versioned_skill_resource() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // rust-dev has version 2026.02.24 in the test-registry
+        let result = client
+            .read_resource("skillet://skills/joshrotenberg/rust-dev/2026.02.24")
+            .await;
+        let text = result.first_text().expect("should have versioned content");
+        assert!(
+            text.contains("Rust"),
+            "versioned content should mention Rust: {text}"
+        );
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "Version '99.99.99' not found")]
+    async fn test_mcp_read_versioned_skill_resource_not_found() {
+        let router = test_router();
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // TestClient::read_resource panics on MCP errors, so we verify
+        // the error message via should_panic
+        let _ = client
+            .read_resource("skillet://skills/joshrotenberg/rust-dev/99.99.99")
+            .await;
+    }
+
+    // ── Local discovery via MCP (#144) ───────────────────────────────
+
+    #[tokio::test]
+    async fn test_mcp_local_skill_in_search() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
+        use std::collections::HashMap;
+
+        // Build state with a synthetic local skill
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let mut skill_index = index::load_index(&registry_path).expect("load index");
+
+        skill_index.skills.insert(
+            ("local".to_string(), "discovered-tool".to_string()),
+            SkillEntry {
+                owner: "local".to_string(),
+                name: "discovered-tool".to_string(),
+                registry_path: None,
+                versions: vec![SkillVersion {
+                    version: "0.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: SkillInfo {
+                            name: "discovered-tool".to_string(),
+                            owner: "local".to_string(),
+                            version: "0.0.0".to_string(),
+                            description: "A locally discovered tool".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "# Discovered Tool\n\nLocally found.\n".to_string(),
+                    skill_toml_raw: String::new(),
+                    yanked: false,
+                    files: HashMap::new(),
+                    published: None,
+                    has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
+                }],
+                source: SkillSource::Local {
+                    platform: "claude".to_string(),
+                    path: PathBuf::from("/home/user/.claude/skills/discovered-tool"),
+                },
+            },
+        );
+
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Local skill should appear in wildcard search
+        let result = client
+            .call_tool("search_skills", serde_json::json!({"query": "*"}))
+            .await;
+        let text = result.all_text();
+        assert!(
+            text.contains("discovered-tool"),
+            "local skill should appear in search: {text}"
+        );
+
+        // Registry skills should also still appear
+        assert!(
+            text.contains("rust-dev"),
+            "registry skills should still appear: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_local_skill_readable_via_resource() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
+        use std::collections::HashMap;
+
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let mut skill_index = index::load_index(&registry_path).expect("load index");
+
+        skill_index.skills.insert(
+            ("local".to_string(), "readable-local".to_string()),
+            SkillEntry {
+                owner: "local".to_string(),
+                name: "readable-local".to_string(),
+                registry_path: None,
+                versions: vec![SkillVersion {
+                    version: "0.0.0".to_string(),
+                    metadata: SkillMetadata {
+                        skill: SkillInfo {
+                            name: "readable-local".to_string(),
+                            owner: "local".to_string(),
+                            version: "0.0.0".to_string(),
+                            description: "A readable local skill".to_string(),
+                            trigger: None,
+                            license: None,
+                            author: None,
+                            classification: None,
+                            compatibility: None,
+                        },
+                    },
+                    skill_md: "# Readable Local\n\nThis is local content.\n".to_string(),
+                    skill_toml_raw: "[skill]\nname = \"readable-local\"\n".to_string(),
+                    yanked: false,
+                    files: HashMap::new(),
+                    published: None,
+                    has_content: true,
+                    content_hash: None,
+                    integrity_ok: None,
+                }],
+                source: SkillSource::Local {
+                    platform: "agents".to_string(),
+                    path: PathBuf::from("/home/user/.agents/skills/readable-local"),
+                },
+            },
+        );
+
+        let skill_search = search::SkillSearch::build(&skill_index);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            skill_index,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Read skill content via resource
+        let result = client
+            .read_resource("skillet://skills/local/readable-local")
+            .await;
+        let text = result.first_text().expect("should have content");
+        assert!(
+            text.contains("Readable Local"),
+            "should return local skill content: {text}"
+        );
+
+        // Read metadata via resource
+        let metadata = client
+            .read_resource("skillet://metadata/local/readable-local")
+            .await;
+        let meta_text = metadata.first_text().expect("should have metadata");
+        assert!(
+            meta_text.contains("readable-local"),
+            "should return local metadata: {meta_text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_mcp_registry_wins_over_local_on_collision() {
+        use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
+        use std::collections::HashMap;
+
+        let registry_path = test_registry_path();
+        let config = index::load_config(&registry_path).expect("load config");
+        let skill_index = index::load_index(&registry_path).expect("load index");
+
+        // Merge a local skill with the same (owner, name) as a registry skill
+        // Since we build the index from the registry first, and the merge is
+        // first-wins, the registry should win.
+        let mut merged = skill_index;
+
+        // Try to insert a local version of "joshrotenberg/rust-dev"
+        // Since it already exists from the registry, merge should keep the registry version
+        let local_index = {
+            let mut idx = skillet_mcp::state::SkillIndex::default();
+            idx.skills.insert(
+                ("joshrotenberg".to_string(), "rust-dev".to_string()),
+                SkillEntry {
+                    owner: "joshrotenberg".to_string(),
+                    name: "rust-dev".to_string(),
+                    registry_path: None,
+                    versions: vec![SkillVersion {
+                        version: "0.0.0".to_string(),
+                        metadata: SkillMetadata {
+                            skill: SkillInfo {
+                                name: "rust-dev".to_string(),
+                                owner: "joshrotenberg".to_string(),
+                                version: "0.0.0".to_string(),
+                                description: "LOCAL VERSION SHOULD NOT WIN".to_string(),
+                                trigger: None,
+                                license: None,
+                                author: None,
+                                classification: None,
+                                compatibility: None,
+                            },
+                        },
+                        skill_md: "# LOCAL rust-dev\n\nThis should not appear.\n".to_string(),
+                        skill_toml_raw: String::new(),
+                        yanked: false,
+                        files: HashMap::new(),
+                        published: None,
+                        has_content: true,
+                        content_hash: None,
+                        integrity_ok: None,
+                    }],
+                    source: SkillSource::Local {
+                        platform: "claude".to_string(),
+                        path: PathBuf::from("/tmp/local-rust-dev"),
+                    },
+                },
+            );
+            idx
+        };
+        merged.merge(local_index);
+
+        let skill_search = search::SkillSearch::build(&merged);
+        let state = AppState::new(
+            vec![registry_path],
+            Vec::new(),
+            merged,
+            skill_search,
+            config,
+        );
+        let caps = ServerCapabilities {
+            tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
+            resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
+        };
+        let router = build_router(state, &caps);
+        let mut client = tower_mcp::TestClient::from_router(router);
+        client.initialize().await;
+
+        // Info should show the registry version, not the local one
+        let result = client
+            .call_tool(
+                "info_skill",
+                serde_json::json!({"owner": "joshrotenberg", "name": "rust-dev"}),
+            )
+            .await;
+        let text = result.all_text();
+        assert!(
+            !text.contains("LOCAL VERSION SHOULD NOT WIN"),
+            "registry should win over local: {text}"
+        );
+        assert!(
+            text.contains("2026.02.24"),
+            "should show registry version: {text}"
+        );
+    }
 }
