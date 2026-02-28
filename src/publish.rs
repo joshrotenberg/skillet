@@ -16,7 +16,7 @@ pub struct PublishResult {
 
 /// Pack the skill and open a PR against the registry repo.
 ///
-/// `repo` is in `owner/repo` format (e.g. "joshrotenberg/skillet-mcp").
+/// `repo` is in `owner/repo` format (e.g. "joshrotenberg/skillet").
 /// `registry_path` overrides the destination path in the registry. If `None`,
 /// the default `owner/name/` layout is used.
 /// If `dry_run` is true, stops after packing and prints what would happen.

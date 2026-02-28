@@ -20,7 +20,7 @@ Add this to your `.mcp.json` (project-level) or `~/.claude/settings.json`
       "command": "docker",
       "args": ["run", "-i", "--rm", "ghcr.io/skillet/server:latest"],
       "env": {
-        "SKILLET_REMOTE": "https://github.com/joshrotenberg/skillet-mcp.git"
+        "SKILLET_REMOTE": "https://github.com/joshrotenberg/skillet.git"
       }
     }
   }

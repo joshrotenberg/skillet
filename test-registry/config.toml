@@ -8,7 +8,7 @@ name = "Josh Rotenberg"
 github = "joshrotenberg"
 
 [[registry.suggests]]
-url = "https://github.com/joshrotenberg/skillet-mcp.git"
+url = "https://github.com/joshrotenberg/skillet.git"
 description = "Official community skills"
 
 [registry.defaults]

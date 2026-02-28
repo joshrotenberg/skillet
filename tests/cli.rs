@@ -574,7 +574,7 @@ fn setup_no_official_registry() {
     let content =
         std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
     assert!(
-        !content.contains("joshrotenberg/skillet-mcp"),
+        !content.contains("joshrotenberg/skillet.git"),
         "config should NOT contain official registry URL: {content}"
     );
 }

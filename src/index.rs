@@ -735,7 +735,7 @@ published = "2026-01-01T00:00:00Z"
 
         let suggests = config.registry.suggests.as_ref().unwrap();
         assert_eq!(suggests.len(), 1);
-        assert!(suggests[0].url.contains("skillet-mcp"));
+        assert!(suggests[0].url.contains("skillet"));
         assert!(suggests[0].description.is_some());
 
         let defaults = config.registry.defaults.as_ref().unwrap();
@@ -818,7 +818,7 @@ api = "https://skills.example.com/api/v1"
 required = true
 
 [[registry.suggests]]
-url = "https://github.com/joshrotenberg/skillet-mcp.git"
+url = "https://github.com/joshrotenberg/skillet.git"
 description = "Official community skills"
 
 [[registry.suggests]]
@@ -847,7 +847,7 @@ refresh_interval = "10m"
 
         let suggests = config.registry.suggests.as_ref().unwrap();
         assert_eq!(suggests.len(), 2);
-        assert!(suggests[0].url.contains("skillet-mcp"));
+        assert!(suggests[0].url.contains("skillet"));
         assert_eq!(
             suggests[0].description.as_deref(),
             Some("Official community skills")

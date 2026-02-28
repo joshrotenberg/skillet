@@ -55,8 +55,8 @@ MCP tools query the search index; resources read from the index directly.
 ### Development Setup
 
 ```bash
-git clone https://github.com/joshrotenberg/skillet-mcp.git
-cd skillet-mcp
+git clone https://github.com/joshrotenberg/skillet.git
+cd skillet
 cargo build
 cargo test --lib --all-features
 ```

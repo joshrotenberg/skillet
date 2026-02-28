@@ -10,7 +10,7 @@ use crate::state::SkillIndex;
 use crate::{git, index};
 
 /// The official default registry, used when no registries are configured.
-pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet-mcp.git";
+pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet.git";
 
 /// Subdirectory within the official registry repo that contains skills.
 pub const DEFAULT_REGISTRY_SUBDIR: &str = "registry";

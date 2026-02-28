@@ -91,7 +91,7 @@ Or with Docker (zero install):
 ```
 
 That's it. Skillet auto-discovers the
-[official registry](https://github.com/joshrotenberg/skillet-mcp/tree/main/registry)
+[official registry](https://github.com/joshrotenberg/skillet/tree/main/registry)
 and any skills already installed on your machine. Your agent now has
 access to `search_skills`, `install_skill`, and the full
 [MCP interface](#mcp-interface).
@@ -476,7 +476,7 @@ targets = ["agents"]    # default install target(s)
 global = false          # install globally vs project-local
 
 [registries]
-remote = ["https://github.com/joshrotenberg/skillet-mcp.git"]
+remote = ["https://github.com/joshrotenberg/skillet.git"]
 local = []
 
 [cache]
@@ -550,7 +550,7 @@ works standalone.
 
 v0.2.0. The skill format is stable, both the CLI and MCP interface are
 functional, and there's an
-[official registry](https://github.com/joshrotenberg/skillet-mcp/tree/main/registry)
+[official registry](https://github.com/joshrotenberg/skillet/tree/main/registry)
 with skills across development, devops, and security categories.
 `skillet.toml` provides a unified project manifest for embedding skills
 in any repository with zero-config discovery.

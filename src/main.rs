@@ -211,7 +211,7 @@ struct PublishArgs {
     /// Path to the skillpack directory
     path: PathBuf,
 
-    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet-mcp")
+    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet")
     #[arg(long)]
     repo: String,
 
