@@ -124,7 +124,6 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
     let trust_check = trust::check_trust(&trust_state, &registry_id, owner, name, &content_hash);
 
     match trust_check.tier {
-        trust::TrustTier::Trusted => {}
         trust::TrustTier::Reviewed => {
             if trust_check.pinned_hash.as_deref() != Some(&content_hash) {
                 eprintln!(
@@ -139,13 +138,10 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
                 eprintln!(
                     "Error: {reason}\n\n\
                      Install blocked: --require-trusted is set.\n\
-                     To install this skill, either:\n\
-                     \n  1. Trust the registry:\n\
-                     \n     skillet trust add-registry {registry_id}\n\
-                     \n  2. Review and pin the skill:\n\
-                     \n     skillet info {owner}/{name}\n\
-                     \n     skillet trust pin {owner}/{name}\n\
-                     \n     skillet install {owner}/{name}\n",
+                     To install this skill, review and pin it first:\n\
+                     \n  skillet info {owner}/{name}\n\
+                     \n  skillet trust pin {owner}/{name}\n\
+                     \n  skillet install {owner}/{name}\n",
                     reason = trust_check.reason,
                 );
                 return ExitCode::from(1);
@@ -157,13 +153,10 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
                     eprintln!(
                         "Error: {reason}\n\n\
                          Install blocked by trust policy (unknown_policy = \"block\").\n\
-                         To install this skill, either:\n\
-                         \n  1. Trust the registry:\n\
-                         \n     skillet trust add-registry {registry_id}\n\
-                         \n  2. Review and pin the skill:\n\
-                         \n     skillet info {owner}/{name}\n\
-                         \n     skillet trust pin {owner}/{name}\n\
-                         \n     skillet install {owner}/{name}\n",
+                         To install this skill, review and pin it first:\n\
+                         \n  skillet info {owner}/{name}\n\
+                         \n  skillet trust pin {owner}/{name}\n\
+                         \n  skillet install {owner}/{name}\n",
                         reason = trust_check.reason,
                     );
                     return ExitCode::from(1);

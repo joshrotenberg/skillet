@@ -506,9 +506,9 @@ fn help_subcommand_trust() {
         .assert()
         .success()
         .stdout(
-            predicate::str::contains("add-registry")
-                .and(predicate::str::contains("pin"))
-                .and(predicate::str::contains("list")),
+            predicate::str::contains("pin")
+                .and(predicate::str::contains("list"))
+                .and(predicate::str::contains("unpin")),
         );
 }
 
@@ -624,128 +624,6 @@ fn audit_detects_tampered_skill() {
 }
 
 #[test]
-fn trust_add_and_list_registry() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    // Add a trusted registry
-    skillet()
-        .args(["trust", "add-registry", "https://example.com/registry.git"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Trusted"));
-
-    // List should show it
-    skillet()
-        .args(["trust", "list"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("https://example.com/registry.git"));
-}
-
-#[test]
-fn trust_add_registry_with_note() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    skillet()
-        .args([
-            "trust",
-            "add-registry",
-            "https://example.com/repo.git",
-            "--note",
-            "Official registry",
-        ])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Trusted"));
-
-    // List should show the note
-    skillet()
-        .args(["trust", "list"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(
-            predicate::str::contains("https://example.com/repo.git")
-                .and(predicate::str::contains("Official registry")),
-        );
-}
-
-#[test]
-fn trust_add_registry_idempotent() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    // Add twice
-    skillet()
-        .args(["trust", "add-registry", "https://example.com/repo.git"])
-        .env("HOME", &home)
-        .assert()
-        .success();
-
-    skillet()
-        .args(["trust", "add-registry", "https://example.com/repo.git"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("already trusted"));
-}
-
-#[test]
-fn trust_remove_registry() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    // Add then remove
-    skillet()
-        .args(["trust", "add-registry", "https://example.com/repo.git"])
-        .env("HOME", &home)
-        .assert()
-        .success();
-
-    skillet()
-        .args(["trust", "remove-registry", "https://example.com/repo.git"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("Removed"));
-
-    // List should be empty
-    skillet()
-        .args(["trust", "list"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("No trusted registries"));
-}
-
-#[test]
-fn trust_remove_nonexistent_registry() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    skillet()
-        .args([
-            "trust",
-            "remove-registry",
-            "https://example.com/nonexistent.git",
-        ])
-        .env("HOME", &home)
-        .assert()
-        .failure()
-        .stderr(predicate::str::contains("not found"));
-}
-
-#[test]
 fn trust_list_empty() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let home = tmp.path().join("home");
@@ -756,7 +634,7 @@ fn trust_list_empty() {
         .env("HOME", &home)
         .assert()
         .success()
-        .stdout(predicate::str::contains("No trusted registries"));
+        .stdout(predicate::str::contains("No pinned skills"));
 }
 
 #[test]
@@ -832,35 +710,6 @@ fn trust_unpin_not_pinned() {
         .assert()
         .failure()
         .stderr(predicate::str::contains("not pinned"));
-}
-
-#[test]
-fn trust_list_registries_only() {
-    let tmp = tempfile::tempdir().expect("create temp dir");
-    let home = tmp.path().join("home");
-    std::fs::create_dir_all(&home).expect("create home");
-
-    // Add a registry and pin a skill
-    skillet()
-        .args(["trust", "add-registry", "https://example.com/repo.git"])
-        .env("HOME", &home)
-        .assert()
-        .success();
-
-    skillet()
-        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
-        .env("HOME", &home)
-        .assert()
-        .success();
-
-    // List with --registries-only should show registry but not pinned skill details
-    skillet()
-        .args(["trust", "list", "--registries-only"])
-        .env("HOME", &home)
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("https://example.com/repo.git"));
 }
 
 // ── Official registry (in-repo) ──────────────────────────────────

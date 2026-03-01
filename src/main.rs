@@ -248,38 +248,12 @@ struct TrustArgs {
 
 #[derive(Subcommand, Debug)]
 enum TrustAction {
-    /// Add a registry to the trusted list
-    AddRegistry(TrustAddRegistryArgs),
-    /// Remove a registry from the trusted list
-    RemoveRegistry(TrustRemoveRegistryArgs),
-    /// List trusted registries and pinned skills
-    List(TrustListArgs),
+    /// List pinned skills
+    List,
     /// Pin a skill's content hash
     Pin(TrustPinArgs),
     /// Remove a skill's content hash pin
     Unpin(TrustUnpinArgs),
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustAddRegistryArgs {
-    /// Registry URL to trust
-    url: String,
-    /// Optional note describing why this registry is trusted
-    #[arg(long)]
-    note: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustRemoveRegistryArgs {
-    /// Registry URL to remove
-    url: String,
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustListArgs {
-    /// Only show trusted registries (omit pinned skills)
-    #[arg(long)]
-    registries_only: bool,
 }
 
 #[derive(clap::Args, Debug)]

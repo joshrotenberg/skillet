@@ -3,71 +3,18 @@ use std::process::ExitCode;
 use skillet_mcp::{config, integrity, manifest, registry, trust};
 
 use super::parse_skill_ref;
-use crate::{
-    AuditArgs, TrustAction, TrustAddRegistryArgs, TrustArgs, TrustListArgs, TrustPinArgs,
-    TrustRemoveRegistryArgs, TrustUnpinArgs,
-};
+use crate::{AuditArgs, TrustAction, TrustArgs, TrustPinArgs, TrustUnpinArgs};
 
 /// Run the `trust` subcommand.
 pub(crate) fn run_trust(args: TrustArgs) -> ExitCode {
     match args.action {
-        TrustAction::AddRegistry(a) => run_trust_add_registry(a),
-        TrustAction::RemoveRegistry(a) => run_trust_remove_registry(a),
-        TrustAction::List(a) => run_trust_list(a),
+        TrustAction::List => run_trust_list(),
         TrustAction::Pin(a) => run_trust_pin(a),
         TrustAction::Unpin(a) => run_trust_unpin(a),
     }
 }
 
-pub(crate) fn run_trust_add_registry(args: TrustAddRegistryArgs) -> ExitCode {
-    let mut state = match trust::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error loading trust state: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    if state.is_trusted(&args.url) {
-        println!("Registry already trusted: {}", args.url);
-        return ExitCode::SUCCESS;
-    }
-
-    state.add_registry(&args.url, args.note.as_deref());
-
-    if let Err(e) = trust::save(&state) {
-        eprintln!("Error saving trust state: {e}");
-        return ExitCode::from(1);
-    }
-
-    println!("Trusted: {}", args.url);
-    ExitCode::SUCCESS
-}
-
-pub(crate) fn run_trust_remove_registry(args: TrustRemoveRegistryArgs) -> ExitCode {
-    let mut state = match trust::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error loading trust state: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    if !state.remove_registry(&args.url) {
-        eprintln!("Registry not found in trusted list: {}", args.url);
-        return ExitCode::from(1);
-    }
-
-    if let Err(e) = trust::save(&state) {
-        eprintln!("Error saving trust state: {e}");
-        return ExitCode::from(1);
-    }
-
-    println!("Removed: {}", args.url);
-    ExitCode::SUCCESS
-}
-
-pub(crate) fn run_trust_list(args: TrustListArgs) -> ExitCode {
+pub(crate) fn run_trust_list() -> ExitCode {
     let state = match trust::load() {
         Ok(s) => s,
         Err(e) => {
@@ -76,38 +23,22 @@ pub(crate) fn run_trust_list(args: TrustListArgs) -> ExitCode {
         }
     };
 
-    if state.trusted_registries.is_empty() && state.pinned_skills.is_empty() {
-        println!("No trusted registries or pinned skills.");
+    if state.pinned_skills.is_empty() {
+        println!("No pinned skills.");
         return ExitCode::SUCCESS;
     }
 
-    if !state.trusted_registries.is_empty() {
-        println!("Trusted registries ({}):\n", state.trusted_registries.len());
-        for r in &state.trusted_registries {
-            print!("  {}", r.registry);
-            if let Some(ref note) = r.note {
-                print!("  ({note})");
-            }
-            println!("  [{}]", r.trusted_at);
-        }
-    }
-
-    if !args.registries_only && !state.pinned_skills.is_empty() {
-        if !state.trusted_registries.is_empty() {
-            println!();
-        }
-        println!("Pinned skills ({}):\n", state.pinned_skills.len());
-        for p in &state.pinned_skills {
-            let hash_display = if p.content_hash.len() > 17 {
-                format!("{}...", &p.content_hash[..17])
-            } else {
-                p.content_hash.clone()
-            };
-            println!(
-                "  {}/{} v{}  {}  [{}]",
-                p.owner, p.name, p.version, hash_display, p.pinned_at
-            );
-        }
+    println!("Pinned skills ({}):\n", state.pinned_skills.len());
+    for p in &state.pinned_skills {
+        let hash_display = if p.content_hash.len() > 17 {
+            format!("{}...", &p.content_hash[..17])
+        } else {
+            p.content_hash.clone()
+        };
+        println!(
+            "  {}/{} v{}  {}  [{}]",
+            p.owner, p.name, p.version, hash_display, p.pinned_at
+        );
     }
 
     ExitCode::SUCCESS

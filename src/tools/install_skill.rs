@@ -113,15 +113,9 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     return Ok(CallToolResult::error(format!(
                         "Install blocked: require_trusted is set in config.\n\n\
                          {}\n\n\
-                         To install this skill, either:\n\
-                         1. Trust the registry: `skillet trust add-registry {}`\n\
-                         2. Review and pin: `skillet info {}/{}`, then `skillet trust pin {}/{}`",
-                        trust_check.reason,
-                        registry_id,
-                        input.owner,
-                        input.name,
-                        input.owner,
-                        input.name,
+                         To install this skill, review and pin it first:\n\
+                         `skillet info {}/{}`, then `skillet trust pin {}/{}`",
+                        trust_check.reason, input.owner, input.name, input.owner, input.name,
                     )));
                 }
 
