@@ -50,7 +50,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     Some(e) => e,
                     None => {
                         return Ok(CallToolResult::error(format!(
-                            "Skill '{}/{}' not found in any registry.",
+                            "Skill '{}/{}' not found in any repo.",
                             input.owner, input.name
                         )));
                     }
@@ -61,7 +61,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     return Ok(CallToolResult::text(format!(
                         "Skill '{}/{}' is already installed locally at `{}`.\n\n\
                          This skill was discovered from the {} agent directory \
-                         and is not a registry skill. No installation needed.",
+                         and is not a repo skill. No installation needed.",
                         input.owner,
                         input.name,
                         path.display(),
@@ -88,8 +88,8 @@ pub fn build(state: Arc<AppState>) -> Tool {
 
                 let global = input.global.unwrap_or(false);
 
-                // Determine registry identifier from state
-                let registry_id = if let Some(path) = state.registry_paths.first() {
+                // Determine repo identifier from state
+                let repo_id = if let Some(path) = state.repo_paths.first() {
                     format!("local:{}", path.display())
                 } else {
                     "unknown".to_string()
@@ -101,7 +101,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let trust_state = trust::load().unwrap_or_default();
                 let trust_check = trust::check_trust(
                     &trust_state,
-                    &registry_id,
+                    &repo_id,
                     &input.owner,
                     &input.name,
                     &content_hash,
@@ -132,7 +132,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let options = InstallOptions {
                     targets,
                     global,
-                    registry: registry_id.clone(),
+                    repo: repo_id.clone(),
                 };
 
                 // Install
@@ -165,7 +165,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                         &input.owner,
                         &input.name,
                         &version.version,
-                        &registry_id,
+                        &repo_id,
                         &content_hash,
                     );
                     let _ = trust::save(&trust_state);

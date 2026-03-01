@@ -1,6 +1,6 @@
 //! Persistent disk cache for SkillIndex.
 //!
-//! Each registry gets its own cache file so a single stale registry
+//! Each repo gets its own cache file so a single stale repo
 //! doesn't invalidate others. The cache stores skill entries as a flat
 //! `Vec` (since `HashMap<(String, String), _>` doesn't serialize cleanly
 //! to JSON) and reconstructs the full `SkillIndex` on load.
@@ -17,12 +17,12 @@ use crate::state::{SkillEntry, SkillIndex};
 /// Bump this to invalidate all caches when the format changes.
 const CACHE_VERSION: u32 = 1;
 
-/// Identifies the source of a registry for cache path derivation.
+/// Identifies the source of a repo for cache path derivation.
 #[derive(Debug)]
-pub enum RegistrySource {
-    /// A local filesystem registry.
+pub enum RepoSource {
+    /// A local filesystem repo.
     Local(PathBuf),
-    /// A remote (git-backed) registry with its URL and local checkout path.
+    /// A remote (git-backed) repo with its URL and local checkout path.
     Remote { url: String, checkout: PathBuf },
 }
 
@@ -37,13 +37,13 @@ struct CachedIndex {
 }
 
 /// Compute the cache file path relative to a given base directory.
-fn cache_path_in(source: &RegistrySource, base: &Path) -> PathBuf {
+fn cache_path_in(source: &RepoSource, base: &Path) -> PathBuf {
     match source {
-        RegistrySource::Local(path) => {
+        RepoSource::Local(path) => {
             let hex = short_hash(&path.to_string_lossy());
             base.join(format!("local_{hex}.json"))
         }
-        RegistrySource::Remote { url, .. } => {
+        RepoSource::Remote { url, .. } => {
             let slug: String = url
                 .trim_end_matches(".git")
                 .rsplit('/')
@@ -67,12 +67,12 @@ fn cache_path_in(source: &RegistrySource, base: &Path) -> PathBuf {
 ///
 /// Returns `None` on any failure (missing, corrupt, expired, version
 /// mismatch, HEAD mismatch). Cache reads are best-effort.
-pub fn load(source: &RegistrySource, ttl: Duration) -> Option<SkillIndex> {
+pub fn load(source: &RepoSource, ttl: Duration) -> Option<SkillIndex> {
     load_in(source, ttl, &cache_dir())
 }
 
 /// Load a cached index using a specific cache base directory.
-fn load_in(source: &RegistrySource, ttl: Duration, base: &Path) -> Option<SkillIndex> {
+fn load_in(source: &RepoSource, ttl: Duration, base: &Path) -> Option<SkillIndex> {
     let path = cache_path_in(source, base);
     let data = std::fs::read_to_string(&path).ok()?;
     let cached: CachedIndex = serde_json::from_str(&data).ok()?;
@@ -96,8 +96,8 @@ fn load_in(source: &RegistrySource, ttl: Duration, base: &Path) -> Option<SkillI
     // Git HEAD check
     if let Some(ref cached_head) = cached.git_head {
         let repo_path = match source {
-            RegistrySource::Local(p) => p.as_path(),
-            RegistrySource::Remote { checkout, .. } => checkout.as_path(),
+            RepoSource::Local(p) => p.as_path(),
+            RepoSource::Remote { checkout, .. } => checkout.as_path(),
         };
         if repo_path.join(".git").exists()
             && let Ok(current_head) = git::head(repo_path)
@@ -131,12 +131,12 @@ fn load_in(source: &RegistrySource, ttl: Duration, base: &Path) -> Option<SkillI
 ///
 /// Logs warnings on failure but does not propagate errors -- cache
 /// writes are best-effort.
-pub fn write(source: &RegistrySource, index: &SkillIndex) {
+pub fn write(source: &RepoSource, index: &SkillIndex) {
     write_in(source, index, &cache_dir());
 }
 
 /// Write a cached index using a specific cache base directory.
-fn write_in(source: &RegistrySource, index: &SkillIndex, base: &Path) {
+fn write_in(source: &RepoSource, index: &SkillIndex, base: &Path) {
     let path = cache_path_in(source, base);
 
     if let Some(parent) = path.parent()
@@ -147,14 +147,14 @@ fn write_in(source: &RegistrySource, index: &SkillIndex, base: &Path) {
     }
 
     let git_head = match source {
-        RegistrySource::Local(p) => {
+        RepoSource::Local(p) => {
             if p.join(".git").exists() {
                 git::head(p).ok()
             } else {
                 None
             }
         }
-        RegistrySource::Remote { checkout, .. } => git::head(checkout).ok(),
+        RepoSource::Remote { checkout, .. } => git::head(checkout).ok(),
     };
 
     let now = SystemTime::now()
@@ -230,7 +230,7 @@ mod tests {
         let entry = SkillEntry {
             owner: "test-owner".to_string(),
             name: "test-skill".to_string(),
-            registry_path: None,
+            repo_path: None,
             source: Default::default(),
             versions: vec![SkillVersion {
                 version: "0.1.0".to_string(),
@@ -265,8 +265,8 @@ mod tests {
         index
     }
 
-    fn temp_source(dir: &Path) -> RegistrySource {
-        RegistrySource::Local(dir.to_path_buf())
+    fn temp_source(dir: &Path) -> RepoSource {
+        RepoSource::Local(dir.to_path_buf())
     }
 
     #[test]
@@ -362,7 +362,7 @@ mod tests {
             .output()
             .unwrap();
 
-        let source = RegistrySource::Local(git_dir.clone());
+        let source = RepoSource::Local(git_dir.clone());
         let index = test_index();
 
         // Write cache (captures current HEAD)
@@ -468,7 +468,7 @@ mod tests {
         let entry = SkillEntry {
             owner: "owner".to_string(),
             name: "with-files".to_string(),
-            registry_path: None,
+            repo_path: None,
             source: Default::default(),
             versions: vec![SkillVersion {
                 version: "1.0.0".to_string(),

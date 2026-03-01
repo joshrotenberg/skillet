@@ -1,7 +1,7 @@
 //! Skillet: a skill registry toolkit for AI agents.
 //!
 //! This library provides the core functionality for loading, searching,
-//! validating, and installing skills from registries. The binary crate
+//! validating, and installing skills from repos. The binary crate
 //! adds the CLI (clap) and MCP server (tower-mcp) on top.
 
 pub mod bm25;
@@ -15,7 +15,7 @@ pub mod install;
 pub mod integrity;
 pub mod manifest;
 pub mod project;
-pub mod registry;
+pub mod repo;
 pub mod safety;
 pub mod scaffold;
 pub mod search;

@@ -1,7 +1,7 @@
 //! Project manifest (`skillet.toml`) types and loading.
 //!
 //! A `skillet.toml` file is a unified manifest that can describe a project,
-//! a single inline skill, a multi-skill directory, a registry, or any
+//! a single inline skill, a multi-skill directory, or any
 //! combination. It enables embedding skills in any repository with zero
 //! configuration beyond a SKILL.md file.
 
@@ -627,7 +627,7 @@ fn build_embedded_entry(
     Ok(crate::state::SkillEntry {
         owner,
         name,
-        registry_path: None,
+        repo_path: None,
         source: crate::state::SkillSource::Embedded {
             project: project_name.to_string(),
             path: skill_path.to_path_buf(),
@@ -739,7 +739,7 @@ fn build_embedded_entry_from_dir(
     Ok(crate::state::SkillEntry {
         owner,
         name,
-        registry_path: None,
+        repo_path: None,
         source: crate::state::SkillSource::Embedded {
             project: project_name.to_string(),
             path: skill_dir.to_path_buf(),

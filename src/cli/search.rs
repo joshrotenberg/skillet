@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use skillet_mcp::{config, manifest, registry, search, state};
+use skillet_mcp::{config, manifest, repo, search, state};
 
 use super::parse_skill_ref;
 use crate::{CategoriesArgs, InfoArgs, ListArgs, SearchArgs};
@@ -15,19 +15,19 @@ pub(crate) fn run_search(args: SearchArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, _repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -112,19 +112,19 @@ pub(crate) fn run_categories(args: CategoriesArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, _repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -170,19 +170,19 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, _registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, _repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -193,7 +193,7 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
     {
         Some(e) => e,
         None => {
-            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            eprintln!("Error: skill '{owner}/{name}' not found in any repo");
             return ExitCode::from(1);
         }
     };
@@ -297,8 +297,8 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
     }
 
     // Registry path for nested skills
-    if let Some(ref rpath) = entry.registry_path {
-        println!("  registry path ......... {rpath}");
+    if let Some(ref rpath) = entry.repo_path {
+        println!("  repo path ......... {rpath}");
     }
 
     ExitCode::SUCCESS

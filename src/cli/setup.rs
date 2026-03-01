@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use skillet_mcp::{config, registry};
+use skillet_mcp::{config, repo};
 
 use crate::SetupArgs;
 
@@ -19,12 +19,12 @@ pub(crate) fn run_setup(args: SetupArgs) -> ExitCode {
 
     // Build remotes list: official first (unless opted out), then user-provided
     let mut remotes = Vec::new();
-    if !args.no_official_registry {
-        remotes.push(registry::DEFAULT_REGISTRY_URL.to_string());
+    if !args.no_official_repo {
+        remotes.push(repo::DEFAULT_REPO_URL.to_string());
     }
     remotes.extend(args.remote);
 
-    let config = match config::generate_default_config(remotes, args.registry, &args.target) {
+    let config = match config::generate_default_config(remotes, args.repo, &args.target) {
         Ok(c) => c,
         Err(e) => {
             eprintln!("Error: {e}");

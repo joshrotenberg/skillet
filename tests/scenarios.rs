@@ -10,15 +10,15 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::PathBuf;
 
-fn test_registry() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+fn test_repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-repo")
 }
 
-fn test_npm_registry() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+fn test_npm_repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-repo")
 }
 
-fn official_registry() -> PathBuf {
+fn official_repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("registry")
 }
 
@@ -38,8 +38,8 @@ fn scenario_consumer_flow() {
 
     // Step 1: Search
     let search_output = skillet()
-        .args(["search", "rust", "--registry"])
-        .arg(test_registry())
+        .args(["search", "rust", "--repo"])
+        .arg(test_repo())
         .output()
         .expect("search");
     let search_stdout = String::from_utf8_lossy(&search_output.stdout);
@@ -50,8 +50,8 @@ fn scenario_consumer_flow() {
 
     // Step 2: Info on the found skill
     skillet()
-        .args(["info", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["info", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(
@@ -62,8 +62,8 @@ fn scenario_consumer_flow() {
 
     // Step 3: Install
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -80,61 +80,60 @@ fn scenario_consumer_flow() {
         .success()
         .stdout(predicate::str::contains("joshrotenberg/rust-dev"));
 
-    // Step 5: Verify file content matches registry
+    // Step 5: Verify file content matches repo
     let installed_md = std::fs::read_to_string(tmp.path().join(".agents/skills/rust-dev/SKILL.md"))
         .expect("read installed SKILL.md");
-    let registry_md =
-        std::fs::read_to_string(test_registry().join("joshrotenberg/rust-dev/SKILL.md"))
-            .expect("read registry SKILL.md");
+    let repo_md = std::fs::read_to_string(test_repo().join("joshrotenberg/rust-dev/SKILL.md"))
+        .expect("read repo SKILL.md");
     assert_eq!(
-        installed_md, registry_md,
-        "installed SKILL.md should match registry content"
+        installed_md, repo_md,
+        "installed SKILL.md should match repo content"
     );
 }
 
-// ── Multi-registry merge ─────────────────────────────────────────────
+// ── Multi-repo merge ─────────────────────────────────────────────
 
-/// Two registries with overlapping names: first-registry-wins on collision,
-/// unique skills from second registry still present.
+/// Two repos with overlapping names: first-repo-wins on collision,
+/// unique skills from second repo still present.
 #[test]
-fn scenario_multi_registry_merge() {
+fn scenario_multi_repo_merge() {
     let tmp = tempfile::tempdir().expect("create temp dir");
 
-    // Create two mini registries
+    // Create two mini repos
     let reg_a = tmp.path().join("reg-a");
     let reg_b = tmp.path().join("reg-b");
 
-    // Registry A: has "shared/tool" and "alpha/unique-a"
-    create_mini_skill(&reg_a, "shared", "tool", "Tool from registry A");
+    // Repo A: has "shared/tool" and "alpha/unique-a"
+    create_mini_skill(&reg_a, "shared", "tool", "Tool from repo A");
     create_mini_skill(&reg_a, "alpha", "unique-a", "Only in A");
-    write_registry_config(&reg_a, "Registry A");
+    write_repo_config(&reg_a, "Repo A");
 
-    // Registry B: has "shared/tool" (different description) and "beta/unique-b"
-    create_mini_skill(&reg_b, "shared", "tool", "Tool from registry B");
+    // Repo B: has "shared/tool" (different description) and "beta/unique-b"
+    create_mini_skill(&reg_b, "shared", "tool", "Tool from repo B");
     create_mini_skill(&reg_b, "beta", "unique-b", "Only in B");
-    write_registry_config(&reg_b, "Registry B");
+    write_repo_config(&reg_b, "Repo B");
 
-    // Search with both registries (A first)
+    // Search with both repos (A first)
     let output = skillet()
-        .args(["search", "*", "--registry"])
+        .args(["search", "*", "--repo"])
         .arg(&reg_a)
-        .args(["--registry"])
+        .args(["--repo"])
         .arg(&reg_b)
         .output()
         .expect("search");
     let stdout = String::from_utf8_lossy(&output.stdout);
 
-    // First registry wins for shared/tool
+    // First repo wins for shared/tool
     assert!(
-        stdout.contains("Tool from registry A"),
-        "first registry should win for shared/tool: {stdout}"
+        stdout.contains("Tool from repo A"),
+        "first repo should win for shared/tool: {stdout}"
     );
     assert!(
-        !stdout.contains("Tool from registry B"),
-        "second registry description should not appear: {stdout}"
+        !stdout.contains("Tool from repo B"),
+        "second repo description should not appear: {stdout}"
     );
 
-    // Unique skills from both registries present
+    // Unique skills from both repos present
     assert!(
         stdout.contains("unique-a"),
         "unique-a from reg A should appear: {stdout}"
@@ -156,8 +155,8 @@ fn scenario_trust_flow() {
 
     // Step 1: Install (auto-pin is enabled by default)
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -213,8 +212,8 @@ fn scenario_install_multiple_targets() {
 
     // Install to agents and claude
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents", "--target", "claude"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -244,8 +243,8 @@ fn scenario_install_with_extra_files() {
 
     // python-dev has scripts/ and references/
     skillet()
-        .args(["install", "acme/python-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "acme/python-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -276,8 +275,8 @@ fn scenario_reinstall_overwrites() {
 
     // Install
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -292,8 +291,8 @@ fn scenario_reinstall_overwrites() {
 
     // Reinstall
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -308,19 +307,19 @@ fn scenario_reinstall_overwrites() {
     );
 }
 
-// ── Nested registry skills ───────────────────────────────────────────
+// ── Nested repo skills ───────────────────────────────────────────
 
-/// search -> info -> install -> list with nested registry structure
+/// search -> info -> install -> list with nested repo structure
 #[test]
-fn scenario_nested_registry_skills() {
+fn scenario_nested_repo_skills() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).expect("create home");
 
     // Step 1: Search should find nested skills
     let search_output = skillet()
-        .args(["search", "maven", "--registry"])
-        .arg(test_registry())
+        .args(["search", "maven", "--repo"])
+        .arg(test_repo())
         .output()
         .expect("search");
     let search_stdout = String::from_utf8_lossy(&search_output.stdout);
@@ -329,23 +328,23 @@ fn scenario_nested_registry_skills() {
         "search should find nested maven-build: {search_stdout}"
     );
 
-    // Step 2: Info on the nested skill should show registry path
+    // Step 2: Info on the nested skill should show repo path
     skillet()
-        .args(["info", "acme/maven-build", "--registry"])
-        .arg(test_registry())
+        .args(["info", "acme/maven-build", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(
             predicate::str::contains("version")
                 .and(predicate::str::contains("description"))
-                .and(predicate::str::contains("registry path"))
+                .and(predicate::str::contains("repo path"))
                 .and(predicate::str::contains("acme/lang/java/maven-build")),
         );
 
     // Step 3: Install the nested skill
     skillet()
-        .args(["install", "acme/maven-build", "--registry"])
-        .arg(test_registry())
+        .args(["install", "acme/maven-build", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -366,19 +365,18 @@ fn scenario_nested_registry_skills() {
     let installed_md =
         std::fs::read_to_string(tmp.path().join(".agents/skills/maven-build/SKILL.md"))
             .expect("read installed SKILL.md");
-    let registry_md =
-        std::fs::read_to_string(test_registry().join("acme/lang/java/maven-build/SKILL.md"))
-            .expect("read registry SKILL.md");
+    let repo_md = std::fs::read_to_string(test_repo().join("acme/lang/java/maven-build/SKILL.md"))
+        .expect("read repo SKILL.md");
     assert_eq!(
-        installed_md, registry_md,
-        "installed SKILL.md should match registry content"
+        installed_md, repo_md,
+        "installed SKILL.md should match repo content"
     );
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, description: &str) {
-    let skill_dir = registry.join(owner).join(name);
+fn create_mini_skill(repo: &std::path::Path, owner: &str, name: &str, description: &str) {
+    let skill_dir = repo.join(owner).join(name);
     std::fs::create_dir_all(&skill_dir).expect("create skill dir");
 
     let toml = format!(
@@ -392,9 +390,9 @@ fn create_mini_skill(registry: &std::path::Path, owner: &str, name: &str, descri
     .expect("write SKILL.md");
 }
 
-fn write_registry_config(registry: &std::path::Path, name: &str) {
-    let config = format!("[registry]\nname = \"{name}\"\n");
-    std::fs::write(registry.join("skillet.toml"), config).expect("write skillet.toml");
+fn write_repo_config(repo: &std::path::Path, name: &str) {
+    let config = format!("[project]\nname = \"{name}\"\n");
+    std::fs::write(repo.join("skillet.toml"), config).expect("write skillet.toml");
 }
 
 // ── Project manifest lifecycle (#144) ────────────────────────────
@@ -402,9 +400,9 @@ fn write_registry_config(registry: &std::path::Path, name: &str) {
 // Local discovery (#144) only runs in MCP server context, not CLI.
 // These tests exercise project manifest features testable via CLI.
 
-/// init-project -> add skills -> search finds them via --registry
+/// init-project -> add skills -> search finds them via --repo
 #[test]
-fn scenario_project_manifest_as_registry() {
+fn scenario_project_manifest_as_repo() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let project = tmp.path().join("my-project");
     std::fs::create_dir_all(&project).expect("create project dir");
@@ -429,9 +427,9 @@ fn scenario_project_manifest_as_registry() {
     )
     .expect("write SKILL.md");
 
-    // Step 3: Search with --registry pointing at the project
+    // Step 3: Search with --repo pointing at the project
     skillet()
-        .args(["search", "*", "--registry"])
+        .args(["search", "*", "--repo"])
         .arg(&project)
         .assert()
         .success()
@@ -474,9 +472,9 @@ fn scenario_init_project_lifecycle() {
         "should have [project] section: {toml}"
     );
 
-    // Step 4: Search with --registry should find the embedded skill
+    // Step 4: Search with --repo should find the embedded skill
     skillet()
-        .args(["search", "*", "--registry"])
+        .args(["search", "*", "--repo"])
         .arg(&project)
         .assert()
         .success()
@@ -512,7 +510,7 @@ fn scenario_init_project_multi() {
 
     // Step 4: Search should find it
     skillet()
-        .args(["search", "*", "--registry"])
+        .args(["search", "*", "--repo"])
         .arg(&project)
         .assert()
         .success()
@@ -530,7 +528,7 @@ fn scenario_config_lifecycle() {
 
     // Step 1: Run setup
     skillet()
-        .args(["setup", "--target", "claude", "--no-official-registry"])
+        .args(["setup", "--target", "claude", "--no-official-repo"])
         .env("HOME", &home)
         .assert()
         .success()
@@ -547,8 +545,8 @@ fn scenario_config_lifecycle() {
 
     // Step 2: Install with the config (should use claude target from config)
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .current_dir(tmp.path())
         .assert()
@@ -567,7 +565,7 @@ fn scenario_config_lifecycle() {
             "--target",
             "agents",
             "--force",
-            "--no-official-registry",
+            "--no-official-repo",
         ])
         .env("HOME", &home)
         .assert()
@@ -580,17 +578,17 @@ fn scenario_config_lifecycle() {
     );
 }
 
-/// Setup with custom registry, verify it appears in config
+/// Setup with custom repo, verify it appears in config
 #[test]
-fn scenario_setup_with_registry() {
+fn scenario_setup_with_repo() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["setup", "--registry"])
-        .arg(test_registry())
-        .args(["--no-official-registry"])
+        .args(["setup", "--repo"])
+        .arg(test_repo())
+        .args(["--no-official-repo"])
         .env("HOME", &home)
         .assert()
         .success();
@@ -598,11 +596,11 @@ fn scenario_setup_with_registry() {
     let config_path = home.join(".config/skillet/config.toml");
     let config = std::fs::read_to_string(&config_path).expect("read config");
     assert!(
-        config.contains("test-registry"),
-        "config should reference the local registry: {config}"
+        config.contains("test-repo"),
+        "config should reference the local repo: {config}"
     );
 
-    // Verify the registry is usable via config (no --registry flag needed)
+    // Verify the repo is usable via config (no --repo flag needed)
     skillet()
         .args(["search", "rust"])
         .env("HOME", &home)
@@ -613,27 +611,27 @@ fn scenario_setup_with_registry() {
 
 // ── Error recovery and edge cases (#146) ─────────────────────────
 
-/// Malformed skill.toml in registry is skipped, valid skills still load
+/// Malformed skill.toml in repo is skipped, valid skills still load
 #[test]
 fn scenario_malformed_skill_skipped() {
     let tmp = tempfile::tempdir().expect("create temp dir");
-    let registry = tmp.path().join("registry");
+    let repo = tmp.path().join("repo");
 
     // Create a valid skill
-    create_mini_skill(&registry, "good", "valid-skill", "A valid skill");
+    create_mini_skill(&repo, "good", "valid-skill", "A valid skill");
 
     // Create a malformed skill (bad TOML)
-    let bad_skill = registry.join("bad/broken-skill");
+    let bad_skill = repo.join("bad/broken-skill");
     std::fs::create_dir_all(&bad_skill).expect("create bad skill dir");
     std::fs::write(bad_skill.join("skill.toml"), "[skill\nname = broken").expect("write bad toml");
     std::fs::write(bad_skill.join("SKILL.md"), "# Broken\n").expect("write SKILL.md");
 
-    write_registry_config(&registry, "Mixed Registry");
+    write_repo_config(&repo, "Mixed Repo");
 
     // Search should find the valid skill and skip the broken one
     let output = skillet()
-        .args(["search", "*", "--registry"])
-        .arg(&registry)
+        .args(["search", "*", "--repo"])
+        .arg(&repo)
         .output()
         .expect("search");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -648,45 +646,45 @@ fn scenario_malformed_skill_skipped() {
     );
 }
 
-/// Empty registry returns no results without error
+/// Empty repo returns no results without error
 #[test]
-fn scenario_empty_registry() {
+fn scenario_empty_repo() {
     let tmp = tempfile::tempdir().expect("create temp dir");
-    let registry = tmp.path().join("empty-registry");
-    std::fs::create_dir_all(&registry).expect("create empty registry");
-    write_registry_config(&registry, "Empty Registry");
+    let repo = tmp.path().join("empty-repo");
+    std::fs::create_dir_all(&repo).expect("create empty repo");
+    write_repo_config(&repo, "Empty Repo");
 
     skillet()
-        .args(["search", "*", "--registry"])
-        .arg(&registry)
+        .args(["search", "*", "--repo"])
+        .arg(&repo)
         .assert()
         .success()
         .stdout(predicate::str::contains("No skills found"));
 }
 
-/// Multi-registry where one has errors, other registry's skills still available
+/// Multi-repo where one has errors, other repo's skills still available
 #[test]
-fn scenario_mixed_registry_health() {
+fn scenario_mixed_repo_health() {
     let tmp = tempfile::tempdir().expect("create temp dir");
 
-    // Good registry
+    // Good repo
     let good_reg = tmp.path().join("good-reg");
     create_mini_skill(&good_reg, "alice", "good-skill", "A working skill");
-    write_registry_config(&good_reg, "Good Registry");
+    write_repo_config(&good_reg, "Good Repo");
 
-    // Bad registry: malformed skill only
+    // Bad repo: malformed skill only
     let bad_reg = tmp.path().join("bad-reg");
     let bad_skill = bad_reg.join("broken/bad-skill");
     std::fs::create_dir_all(&bad_skill).expect("create bad skill dir");
     std::fs::write(bad_skill.join("skill.toml"), "not valid toml {{{{").expect("write bad toml");
     std::fs::write(bad_skill.join("SKILL.md"), "# Bad\n").expect("write SKILL.md");
-    write_registry_config(&bad_reg, "Bad Registry");
+    write_repo_config(&bad_reg, "Bad Repo");
 
-    // Search across both registries
+    // Search across both repos
     let output = skillet()
-        .args(["search", "*", "--registry"])
+        .args(["search", "*", "--repo"])
         .arg(&good_reg)
-        .args(["--registry"])
+        .args(["--repo"])
         .arg(&bad_reg)
         .output()
         .expect("search");
@@ -694,7 +692,7 @@ fn scenario_mixed_registry_health() {
 
     assert!(
         stdout.contains("good-skill"),
-        "good registry skills should still work: {stdout}"
+        "good repo skills should still work: {stdout}"
     );
 }
 
@@ -709,8 +707,8 @@ fn scenario_corrupt_cache_recovery() {
 
     // First search populates cache
     skillet()
-        .args(["search", "rust", "--registry"])
-        .arg(test_registry())
+        .args(["search", "rust", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .env("SKILLET_CACHE_DIR", &cache_dir)
         .assert()
@@ -728,8 +726,8 @@ fn scenario_corrupt_cache_recovery() {
 
     // Second search should recover gracefully (rebuild from source)
     skillet()
-        .args(["search", "rust", "--registry"])
-        .arg(test_registry())
+        .args(["search", "rust", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .env("SKILLET_CACHE_DIR", &cache_dir)
         .assert()
@@ -737,17 +735,17 @@ fn scenario_corrupt_cache_recovery() {
         .stdout(predicate::str::contains("rust-dev"));
 }
 
-/// Install from a registry that has a skill missing SKILL.md
+/// Install from a repo that has a skill missing SKILL.md
 #[test]
 fn scenario_missing_skill_md_skipped() {
     let tmp = tempfile::tempdir().expect("create temp dir");
-    let registry = tmp.path().join("registry");
+    let repo = tmp.path().join("repo");
 
     // Valid skill
-    create_mini_skill(&registry, "owner", "good-skill", "Has everything");
+    create_mini_skill(&repo, "owner", "good-skill", "Has everything");
 
     // Skill with only skill.toml, no SKILL.md
-    let no_md = registry.join("owner/no-md-skill");
+    let no_md = repo.join("owner/no-md-skill");
     std::fs::create_dir_all(&no_md).expect("create no-md skill dir");
     std::fs::write(
         no_md.join("skill.toml"),
@@ -755,12 +753,12 @@ fn scenario_missing_skill_md_skipped() {
     )
     .expect("write skill.toml");
 
-    write_registry_config(&registry, "Test Registry");
+    write_repo_config(&repo, "Test Repo");
 
     // Search should find the good skill, skip the one without SKILL.md
     let output = skillet()
-        .args(["search", "*", "--registry"])
-        .arg(&registry)
+        .args(["search", "*", "--repo"])
+        .arg(&repo)
         .output()
         .expect("search");
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -782,8 +780,8 @@ fn scenario_npm_repo_compatibility() {
 
     // Step 1: Search finds all 3 skills
     let search_output = skillet()
-        .args(["search", "*", "--registry"])
-        .arg(test_npm_registry())
+        .args(["search", "*", "--repo"])
+        .arg(test_npm_repo())
         .output()
         .expect("search");
     let search_stdout = String::from_utf8_lossy(&search_output.stdout);
@@ -802,16 +800,16 @@ fn scenario_npm_repo_compatibility() {
 
     // Step 2: Info shows frontmatter metadata
     skillet()
-        .args(["info", "redis/redis-caching", "--registry"])
-        .arg(test_npm_registry())
+        .args(["info", "redis/redis-caching", "--repo"])
+        .arg(test_npm_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("2.1.0").and(predicate::str::contains("caching")));
 
     // Step 3: Install skill with rules/ files
     skillet()
-        .args(["install", "redis/redis-caching", "--registry"])
-        .arg(test_npm_registry())
+        .args(["install", "redis/redis-caching", "--repo"])
+        .arg(test_npm_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -834,9 +832,8 @@ fn scenario_npm_repo_compatibility() {
     // Step 5: Verify content matches source
     let installed_md =
         std::fs::read_to_string(skill_dir.join("SKILL.md")).expect("read installed SKILL.md");
-    let source_md =
-        std::fs::read_to_string(test_npm_registry().join("skills/redis-caching/SKILL.md"))
-            .expect("read source SKILL.md");
+    let source_md = std::fs::read_to_string(test_npm_repo().join("skills/redis-caching/SKILL.md"))
+        .expect("read source SKILL.md");
     assert_eq!(
         installed_md, source_md,
         "installed SKILL.md should match source"
@@ -844,8 +841,8 @@ fn scenario_npm_repo_compatibility() {
 
     // Step 6: Install skill with references/
     skillet()
-        .args(["install", "redis/vector-search", "--registry"])
-        .arg(test_npm_registry())
+        .args(["install", "redis/vector-search", "--repo"])
+        .arg(test_npm_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -859,19 +856,19 @@ fn scenario_npm_repo_compatibility() {
     );
 }
 
-// ── Official registry dogfood (#151) ──────────────────────────────
+// ── Official repo dogfood (#151) ──────────────────────────────
 
-/// search -> info -> install from the in-repo official registry
+/// search -> info -> install from the in-repo official repo
 #[test]
-fn scenario_official_registry_dogfood() {
+fn scenario_official_repo_dogfood() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).expect("create home");
 
     // Step 1: Search finds all official skills
     let search_output = skillet()
-        .args(["search", "*", "--registry"])
-        .arg(official_registry())
+        .args(["search", "*", "--repo"])
+        .arg(official_repo())
         .output()
         .expect("search");
     let search_stdout = String::from_utf8_lossy(&search_output.stdout);
@@ -890,8 +887,8 @@ fn scenario_official_registry_dogfood() {
 
     // Step 2: Info on a specific skill
     skillet()
-        .args(["info", "skillet/user", "--registry"])
-        .arg(official_registry())
+        .args(["info", "skillet/user", "--repo"])
+        .arg(official_repo())
         .assert()
         .success()
         .stdout(
@@ -902,8 +899,8 @@ fn scenario_official_registry_dogfood() {
 
     // Step 3: Install a skill
     skillet()
-        .args(["install", "skillet/user", "--registry"])
-        .arg(official_registry())
+        .args(["install", "skillet/user", "--repo"])
+        .arg(official_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -914,10 +911,10 @@ fn scenario_official_registry_dogfood() {
     // Step 4: Verify installed content
     let installed_md = std::fs::read_to_string(tmp.path().join(".agents/skills/user/SKILL.md"))
         .expect("read installed SKILL.md");
-    let registry_md = std::fs::read_to_string(official_registry().join("skillet/user/SKILL.md"))
-        .expect("read registry SKILL.md");
+    let repo_md = std::fs::read_to_string(official_repo().join("skillet/user/SKILL.md"))
+        .expect("read repo SKILL.md");
     assert_eq!(
-        installed_md, registry_md,
-        "installed SKILL.md should match registry content"
+        installed_md, repo_md,
+        "installed SKILL.md should match repo content"
     );
 }

@@ -24,7 +24,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
 
                 if index.categories.is_empty() {
                     return Ok(CallToolResult::text(
-                        "No categories found. The registry may be empty.",
+                        "No categories found. The repo may be empty.",
                     ));
                 }
 

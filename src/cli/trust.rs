@@ -1,6 +1,6 @@
 use std::process::ExitCode;
 
-use skillet_mcp::{config, integrity, manifest, registry, trust};
+use skillet_mcp::{config, integrity, manifest, repo, trust};
 
 use super::parse_skill_ref;
 use crate::{AuditArgs, TrustAction, TrustArgs, TrustPinArgs, TrustUnpinArgs};
@@ -61,19 +61,19 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -84,7 +84,7 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
     {
         Some(e) => e,
         None => {
-            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            eprintln!("Error: skill '{owner}/{name}' not found in any repo");
             return ExitCode::from(1);
         }
     };
@@ -97,8 +97,8 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    let registry_id = if !registry_paths.is_empty() {
-        registry::registry_id(&registry_paths[0], &args.registries.remote)
+    let repo_id = if !repo_paths.is_empty() {
+        repo::repo_id(&repo_paths[0], &args.repos.remote)
     } else {
         "unknown".to_string()
     };
@@ -113,7 +113,7 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    trust_state.pin_skill(owner, name, &version.version, &registry_id, &content_hash);
+    trust_state.pin_skill(owner, name, &version.version, &repo_id, &content_hash);
 
     if let Err(e) = trust::save(&trust_state) {
         eprintln!("Error saving trust state: {e}");

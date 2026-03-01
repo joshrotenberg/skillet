@@ -46,7 +46,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     Some(e) => e,
                     None => {
                         return Ok(CallToolResult::error(format!(
-                            "Skill '{label_a}' not found in any registry."
+                            "Skill '{label_a}' not found in any repo."
                         )));
                     }
                 };
@@ -57,7 +57,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     Some(e) => e,
                     None => {
                         return Ok(CallToolResult::error(format!(
-                            "Skill '{label_b}' not found in any registry."
+                            "Skill '{label_b}' not found in any repo."
                         )));
                     }
                 };

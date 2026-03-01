@@ -1,7 +1,7 @@
 //! CLI configuration: config file loading, install targets, and shared utilities.
 //!
 //! The skillet config file lives at `~/.config/skillet/config.toml` and controls
-//! default install targets, registries, and other CLI behavior.
+//! default install targets, repos, and other CLI behavior.
 
 use std::path::{Path, PathBuf};
 
@@ -14,7 +14,8 @@ use crate::error::Error;
 #[serde(default)]
 pub struct SkilletConfig {
     pub install: InstallConfig,
-    pub registries: RegistriesConfig,
+    #[serde(alias = "registries")]
+    pub repos: ReposConfig,
     pub cache: CacheConfig,
     pub safety: SafetyConfig,
     pub trust: TrustConfig,
@@ -66,12 +67,12 @@ pub struct SafetyConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TrustConfig {
-    /// Policy for skills from unknown (untrusted) registries.
+    /// Policy for skills from unknown (unpinned) sources.
     /// "warn" (default), "prompt", or "block".
     pub unknown_policy: String,
     /// Automatically pin content hash on install.
     pub auto_pin: bool,
-    /// Require trusted registry or pinned hash for installs.
+    /// Require pinned hash for installs.
     /// When true, blocks installs from unknown sources.
     #[serde(default)]
     pub require_trusted: bool,
@@ -123,10 +124,10 @@ impl Default for InstallConfig {
     }
 }
 
-/// `[registries]` section: default local and remote registries.
+/// `[repos]` section: default local and remote repos.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
-pub struct RegistriesConfig {
+pub struct ReposConfig {
     pub local: Vec<PathBuf>,
     pub remote: Vec<String>,
 }
@@ -286,7 +287,7 @@ pub fn config_dir() -> PathBuf {
 /// Build a default `SkilletConfig` for first-time setup.
 ///
 /// Validates the target via `InstallTarget::parse()`. Builds a config with the
-/// provided registries and target. Everything else uses struct defaults.
+/// provided repos and target. Everything else uses struct defaults.
 pub fn generate_default_config(
     remotes: Vec<String>,
     local: Vec<PathBuf>,
@@ -300,7 +301,7 @@ pub fn generate_default_config(
             targets: vec![target.to_string()],
             global: false,
         },
-        registries: RegistriesConfig {
+        repos: ReposConfig {
             local,
             remote: remotes,
         },
@@ -369,8 +370,8 @@ mod tests {
         let config = SkilletConfig::default();
         assert_eq!(config.install.targets, vec!["agents"]);
         assert!(!config.install.global);
-        assert!(config.registries.local.is_empty());
-        assert!(config.registries.remote.is_empty());
+        assert!(config.repos.local.is_empty());
+        assert!(config.repos.remote.is_empty());
 
         // load_config_from on missing file should error
         assert!(load_config_from(&path).is_err());
@@ -397,12 +398,9 @@ remote = ["https://github.com/owner/repo.git"]
         let config = load_config_from(&path).unwrap();
         assert_eq!(config.install.targets, vec!["claude", "cursor"]);
         assert!(config.install.global);
+        assert_eq!(config.repos.local, vec![PathBuf::from("/path/to/local")]);
         assert_eq!(
-            config.registries.local,
-            vec![PathBuf::from("/path/to/local")]
-        );
-        assert_eq!(
-            config.registries.remote,
+            config.repos.remote,
             vec!["https://github.com/owner/repo.git"]
         );
     }
@@ -423,7 +421,7 @@ targets = ["gemini"]
         let config = load_config_from(&path).unwrap();
         assert_eq!(config.install.targets, vec!["gemini"]);
         assert!(!config.install.global);
-        assert!(config.registries.local.is_empty());
+        assert!(config.repos.local.is_empty());
     }
 
     #[test]
@@ -441,7 +439,7 @@ targets = ["gemini"]
                 targets: vec!["claude".to_string()],
                 global: false,
             },
-            registries: RegistriesConfig::default(),
+            repos: ReposConfig::default(),
             ..Default::default()
         };
         let flags = vec!["cursor".to_string()];
@@ -456,7 +454,7 @@ targets = ["gemini"]
                 targets: vec!["claude".to_string(), "cursor".to_string()],
                 global: false,
             },
-            registries: RegistriesConfig::default(),
+            repos: ReposConfig::default(),
             ..Default::default()
         };
         let targets = resolve_targets(&[], &config).unwrap();
@@ -470,7 +468,7 @@ targets = ["gemini"]
                 targets: Vec::new(),
                 global: false,
             },
-            registries: RegistriesConfig::default(),
+            repos: ReposConfig::default(),
             ..Default::default()
         };
         let targets = resolve_targets(&[], &config).unwrap();
@@ -620,11 +618,8 @@ resources = ["skills", "metadata"]
         )
         .unwrap();
         assert_eq!(config.install.targets, vec!["agents"]);
-        assert_eq!(
-            config.registries.remote,
-            vec!["https://example.com/repo.git"]
-        );
-        assert!(config.registries.local.is_empty());
+        assert_eq!(config.repos.remote, vec!["https://example.com/repo.git"]);
+        assert!(config.repos.local.is_empty());
     }
 
     #[test]
@@ -652,10 +647,7 @@ resources = ["skills", "metadata"]
 
         let loaded = load_config_from(&path).unwrap();
         assert_eq!(loaded.install.targets, vec!["claude"]);
-        assert_eq!(
-            loaded.registries.remote,
-            vec!["https://example.com/repo.git"]
-        );
+        assert_eq!(loaded.repos.remote, vec!["https://example.com/repo.git"]);
 
         // Restore HOME
         if let Some(h) = prev_home {

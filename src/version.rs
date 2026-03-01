@@ -10,7 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
-use crate::registry::default_cache_dir;
+use crate::repo::default_cache_dir;
 
 /// How often to check for a new version (24 hours).
 const CHECK_INTERVAL: Duration = Duration::from_secs(24 * 60 * 60);

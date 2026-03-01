@@ -1,7 +1,7 @@
 use std::process::ExitCode;
 
 use skillet_mcp::install::{self, InstallOptions};
-use skillet_mcp::{config, integrity, manifest, registry, safety, trust};
+use skillet_mcp::{config, integrity, manifest, repo, safety, trust};
 
 use super::{parse_skill_ref, print_safety_report};
 use crate::InstallArgs;
@@ -24,7 +24,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
@@ -38,15 +38,15 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
 
     let global = args.global || cli_config.install.global;
 
-    let (skill_index, registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -58,7 +58,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
     {
         Some(e) => e,
         None => {
-            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            eprintln!("Error: skill '{owner}/{name}' not found in any repo");
             return ExitCode::from(1);
         }
     };
@@ -104,9 +104,9 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
         }
     };
 
-    // Determine registry identifier
-    let registry_id = if !registry_paths.is_empty() {
-        registry::registry_id(&registry_paths[0], &args.registries.remote)
+    // Determine repo identifier
+    let repo_id = if !repo_paths.is_empty() {
+        repo::repo_id(&repo_paths[0], &args.repos.remote)
     } else {
         "unknown".to_string()
     };
@@ -121,7 +121,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
         }
     };
 
-    let trust_check = trust::check_trust(&trust_state, &registry_id, owner, name, &content_hash);
+    let trust_check = trust::check_trust(&trust_state, &repo_id, owner, name, &content_hash);
 
     match trust_check.tier {
         trust::TrustTier::Reviewed => {
@@ -191,7 +191,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
     let options = InstallOptions {
         targets,
         global,
-        registry: registry_id.clone(),
+        repo: repo_id.clone(),
     };
 
     let results =
@@ -212,7 +212,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
     // Auto-pin content hash after successful install
     if cli_config.trust.auto_pin {
         let mut trust_state = trust_state;
-        trust_state.pin_skill(owner, name, &version.version, &registry_id, &content_hash);
+        trust_state.pin_skill(owner, name, &version.version, &repo_id, &content_hash);
         if let Err(e) = trust::save(&trust_state) {
             eprintln!("Warning: failed to save trust state: {e}");
         }

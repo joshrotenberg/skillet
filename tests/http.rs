@@ -16,15 +16,15 @@ fn free_port() -> u16 {
 /// Spawn the skillet HTTP server on the given port, returning the child process.
 fn spawn_server(port: u16) -> Child {
     let bin = assert_cmd::cargo::cargo_bin!("skillet");
-    let registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry");
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo");
 
     Command::new(bin)
         .args([
             "serve",
             "--http",
             &format!("127.0.0.1:{port}"),
-            "--registry",
-            registry.to_str().unwrap(),
+            "--repo",
+            repo.to_str().unwrap(),
             "--log-level",
             "error",
         ])

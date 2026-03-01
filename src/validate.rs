@@ -1,7 +1,7 @@
 //! Standalone skillpack validation.
 //!
 //! Validates a skillpack directory (containing `skill.toml` and `SKILL.md`)
-//! without requiring a full registry context. Used by `skillet validate` and
+//! without requiring a full repo context. Used by `skillet validate` and
 //! internally by `index::load_skill()`.
 
 use std::collections::HashMap;
@@ -309,13 +309,13 @@ fn check_frontmatter_consistency(
 mod tests {
     use super::*;
 
-    fn test_registry() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+    fn test_repo() -> std::path::PathBuf {
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo")
     }
 
     #[test]
     fn test_validate_valid_skill() {
-        let dir = test_registry().join("joshrotenberg/rust-dev");
+        let dir = test_repo().join("joshrotenberg/rust-dev");
         if !dir.exists() {
             return;
         }
@@ -329,7 +329,7 @@ mod tests {
 
     #[test]
     fn test_validate_skill_with_extra_files() {
-        let dir = test_registry().join("joshrotenberg/skillet-dev");
+        let dir = test_repo().join("joshrotenberg/skillet-dev");
         if !dir.exists() {
             return;
         }
@@ -430,7 +430,7 @@ description = "test"
 
     #[test]
     fn test_validate_with_verified_manifest() {
-        let dir = test_registry().join("joshrotenberg/code-review");
+        let dir = test_repo().join("joshrotenberg/code-review");
         if !dir.exists() {
             return;
         }
@@ -440,7 +440,7 @@ description = "test"
 
     #[test]
     fn test_validate_with_mismatched_manifest() {
-        let dir = test_registry().join("acme/git-conventions");
+        let dir = test_repo().join("acme/git-conventions");
         if !dir.exists() {
             return;
         }
@@ -472,7 +472,7 @@ description = "test"
 
     #[test]
     fn test_validate_lenient_with_skill_toml_delegates_strict() {
-        let dir = test_registry().join("joshrotenberg/rust-dev");
+        let dir = test_repo().join("joshrotenberg/rust-dev");
         if !dir.exists() {
             return;
         }

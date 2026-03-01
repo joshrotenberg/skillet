@@ -1,6 +1,6 @@
 //! CLI integration tests using assert_cmd.
 //!
-//! All tests use `--registry test-registry` to point at the in-repo fixture.
+//! All tests use `--repo test-repo` to point at the in-repo fixture.
 //! Tests that write to disk use tempfile for isolation and override `$HOME`
 //! so config/manifest paths don't touch the real filesystem.
 
@@ -8,15 +8,15 @@ use assert_cmd::Command;
 use predicates::prelude::*;
 use std::path::PathBuf;
 
-fn test_registry() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+fn test_repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-repo")
 }
 
-fn test_npm_registry() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+fn test_npm_repo() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-repo")
 }
 
-fn official_registry() -> PathBuf {
+fn official_repo() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("registry")
 }
 
@@ -30,8 +30,8 @@ fn skillet() -> Command {
 #[test]
 fn search_by_keyword() {
     skillet()
-        .args(["search", "rust", "--registry"])
-        .arg(test_registry())
+        .args(["search", "rust", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("rust-dev"));
@@ -40,8 +40,8 @@ fn search_by_keyword() {
 #[test]
 fn search_wildcard_lists_all() {
     skillet()
-        .args(["search", "*", "--registry"])
-        .arg(test_registry())
+        .args(["search", "*", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("Found"));
@@ -50,8 +50,8 @@ fn search_wildcard_lists_all() {
 #[test]
 fn search_owner_filter() {
     skillet()
-        .args(["search", "*", "--owner", "joshrotenberg", "--registry"])
-        .arg(test_registry())
+        .args(["search", "*", "--owner", "joshrotenberg", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(
@@ -63,8 +63,8 @@ fn search_owner_filter() {
 #[test]
 fn search_category_filter() {
     skillet()
-        .args(["search", "*", "--category", "security", "--registry"])
-        .arg(test_registry())
+        .args(["search", "*", "--category", "security", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(
@@ -76,8 +76,8 @@ fn search_category_filter() {
 #[test]
 fn search_tag_filter() {
     skillet()
-        .args(["search", "*", "--tag", "pytest", "--registry"])
-        .arg(test_registry())
+        .args(["search", "*", "--tag", "pytest", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("python-dev"));
@@ -86,8 +86,8 @@ fn search_tag_filter() {
 #[test]
 fn search_no_results() {
     skillet()
-        .args(["search", "nonexistent_xyzzy_skill", "--registry"])
-        .arg(test_registry())
+        .args(["search", "nonexistent_xyzzy_skill", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("No skills found"));
@@ -96,8 +96,8 @@ fn search_no_results() {
 #[test]
 fn categories_lists_with_counts() {
     skillet()
-        .args(["categories", "--registry"])
-        .arg(test_registry())
+        .args(["categories", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("development").and(predicate::str::contains("categor")));
@@ -108,8 +108,8 @@ fn categories_lists_with_counts() {
 #[test]
 fn info_shows_skill_details() {
     skillet()
-        .args(["info", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["info", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .assert()
         .success()
         .stdout(
@@ -123,8 +123,8 @@ fn info_shows_skill_details() {
 #[test]
 fn info_not_found() {
     skillet()
-        .args(["info", "nonexistent/skill", "--registry"])
-        .arg(test_registry())
+        .args(["info", "nonexistent/skill", "--repo"])
+        .arg(test_repo())
         .assert()
         .failure()
         .stderr(predicate::str::contains("not found"));
@@ -139,8 +139,8 @@ fn install_writes_files() {
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -165,8 +165,8 @@ fn list_shows_installed_skill() {
 
     // Install first
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -207,8 +207,8 @@ fn install_not_found() {
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["install", "nonexistent/skill", "--registry"])
-        .arg(test_registry())
+        .args(["install", "nonexistent/skill", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .current_dir(tmp.path())
         .assert()
@@ -222,7 +222,7 @@ fn install_not_found() {
 fn validate_clean_skill() {
     skillet()
         .args(["validate"])
-        .arg(test_registry().join("joshrotenberg/rust-dev"))
+        .arg(test_repo().join("joshrotenberg/rust-dev"))
         .assert()
         .success()
         .stdout(
@@ -236,7 +236,7 @@ fn validate_clean_skill() {
 fn validate_unsafe_skill_exits_2() {
     skillet()
         .args(["validate"])
-        .arg(test_registry().join("acme/unsafe-demo"))
+        .arg(test_repo().join("acme/unsafe-demo"))
         .assert()
         .code(2)
         .stdout(predicate::str::contains("Safety scan"))
@@ -247,7 +247,7 @@ fn validate_unsafe_skill_exits_2() {
 fn validate_unsafe_skill_skip_safety() {
     skillet()
         .args(["validate", "--skip-safety"])
-        .arg(test_registry().join("acme/unsafe-demo"))
+        .arg(test_repo().join("acme/unsafe-demo"))
         .assert()
         .success()
         .stdout(predicate::str::contains("Validation passed"));
@@ -377,13 +377,13 @@ fn setup_custom_remote() {
 }
 
 #[test]
-fn setup_no_official_registry() {
+fn setup_no_official_repo() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let home = tmp.path().join("home");
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["setup", "--no-official-registry"])
+        .args(["setup", "--no-official-repo"])
         .env("HOME", &home)
         .assert()
         .success();
@@ -392,17 +392,17 @@ fn setup_no_official_registry() {
         std::fs::read_to_string(home.join(".config/skillet/config.toml")).expect("read config");
     assert!(
         !content.contains("joshrotenberg/skillet.git"),
-        "config should NOT contain official registry URL: {content}"
+        "config should NOT contain official repo URL: {content}"
     );
 }
 
-// ── npm-style registry tests ─────────────────────────────────────
+// ── npm-style repo tests ─────────────────────────────────────
 
 #[test]
-fn search_npm_registry() {
+fn search_npm_repo() {
     skillet()
-        .args(["search", "*", "--registry"])
-        .arg(test_npm_registry())
+        .args(["search", "*", "--repo"])
+        .arg(test_npm_repo())
         .assert()
         .success()
         .stdout(
@@ -413,20 +413,20 @@ fn search_npm_registry() {
 }
 
 #[test]
-fn search_npm_registry_by_keyword() {
+fn search_npm_repo_by_keyword() {
     skillet()
-        .args(["search", "caching", "--registry"])
-        .arg(test_npm_registry())
+        .args(["search", "caching", "--repo"])
+        .arg(test_npm_repo())
         .assert()
         .success()
         .stdout(predicate::str::contains("redis-caching"));
 }
 
 #[test]
-fn info_npm_registry_with_frontmatter() {
+fn info_npm_repo_with_frontmatter() {
     skillet()
-        .args(["info", "redis/redis-caching", "--registry"])
-        .arg(test_npm_registry())
+        .args(["info", "redis/redis-caching", "--repo"])
+        .arg(test_npm_repo())
         .assert()
         .success()
         .stdout(
@@ -437,10 +437,10 @@ fn info_npm_registry_with_frontmatter() {
 }
 
 #[test]
-fn info_npm_registry_no_frontmatter() {
+fn info_npm_repo_no_frontmatter() {
     skillet()
-        .args(["info", "redis/session-management", "--registry"])
-        .arg(test_npm_registry())
+        .args(["info", "redis/session-management", "--repo"])
+        .arg(test_npm_repo())
         .assert()
         .success()
         .stdout(
@@ -515,8 +515,8 @@ fn help_subcommand_trust() {
 #[test]
 fn search_missing_query() {
     skillet()
-        .args(["search", "--registry"])
-        .arg(test_registry())
+        .args(["search", "--repo"])
+        .arg(test_repo())
         .assert()
         .failure()
         .stderr(predicate::str::contains("QUERY").or(predicate::str::contains("required")));
@@ -525,8 +525,8 @@ fn search_missing_query() {
 #[test]
 fn install_missing_skill_arg() {
     skillet()
-        .args(["install", "--registry"])
-        .arg(test_registry())
+        .args(["install", "--repo"])
+        .arg(test_repo())
         .assert()
         .failure()
         .stderr(predicate::str::contains("SKILL").or(predicate::str::contains("required")));
@@ -535,8 +535,8 @@ fn install_missing_skill_arg() {
 #[test]
 fn info_missing_skill_arg() {
     skillet()
-        .args(["info", "--registry"])
-        .arg(test_registry())
+        .args(["info", "--repo"])
+        .arg(test_repo())
         .assert()
         .failure()
         .stderr(predicate::str::contains("SKILL").or(predicate::str::contains("required")));
@@ -575,8 +575,8 @@ fn audit_after_install() {
 
     // Install a skill
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -601,8 +601,8 @@ fn audit_detects_tampered_skill() {
 
     // Install a skill
     skillet()
-        .args(["install", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .args(["--target", "agents"])
         .env("HOME", &home)
         .current_dir(tmp.path())
@@ -644,8 +644,8 @@ fn trust_pin_skill() {
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["trust", "pin", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .assert()
         .success()
@@ -667,8 +667,8 @@ fn trust_pin_nonexistent_skill() {
     std::fs::create_dir_all(&home).expect("create home");
 
     skillet()
-        .args(["trust", "pin", "nonexistent/skill-xyzzy", "--registry"])
-        .arg(test_registry())
+        .args(["trust", "pin", "nonexistent/skill-xyzzy", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .assert()
         .failure()
@@ -683,8 +683,8 @@ fn trust_unpin_skill() {
 
     // Pin first
     skillet()
-        .args(["trust", "pin", "joshrotenberg/rust-dev", "--registry"])
-        .arg(test_registry())
+        .args(["trust", "pin", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
         .env("HOME", &home)
         .assert()
         .success();
@@ -712,13 +712,13 @@ fn trust_unpin_not_pinned() {
         .stderr(predicate::str::contains("not pinned"));
 }
 
-// ── Official registry (in-repo) ──────────────────────────────────
+// ── Official repo (in-repo) ──────────────────────────────────
 
 #[test]
-fn search_official_registry() {
+fn search_official_repo() {
     skillet()
-        .args(["search", "*", "--registry"])
-        .arg(official_registry())
+        .args(["search", "*", "--repo"])
+        .arg(official_repo())
         .assert()
         .success()
         .stdout(
@@ -731,8 +731,8 @@ fn search_official_registry() {
 #[test]
 fn info_official_skill() {
     skillet()
-        .args(["info", "skillet/user", "--registry"])
-        .arg(official_registry())
+        .args(["info", "skillet/user", "--repo"])
+        .arg(official_repo())
         .assert()
         .success()
         .stdout(

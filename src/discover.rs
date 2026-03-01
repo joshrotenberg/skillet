@@ -2,7 +2,7 @@
 //!
 //! Scans well-known agent skill directories (global and project-local) for
 //! `SKILL.md` files and builds synthetic `SkillEntry` records. These are
-//! merged into the main index after registry skills, so registry skills
+//! merged into the main index after repo skills, so repo skills
 //! always win on name collision.
 
 use std::path::Path;
@@ -123,7 +123,7 @@ fn build_local_entry(name: &str, path: &Path, platform: &str) -> anyhow::Result<
     Ok(SkillEntry {
         owner: "local".to_string(),
         name: name.to_string(),
-        registry_path: None,
+        repo_path: None,
         source: SkillSource::Local {
             platform: platform.to_string(),
             path: path.to_path_buf(),

@@ -1,6 +1,6 @@
-//! Index loading from a local registry directory
+//! Index loading from a local repo directory
 //!
-//! Walks the registry directory tree looking for skill directories containing
+//! Walks the repo directory tree looking for skill directories containing
 //! `skill.toml`. Supports both flat (`owner/skill-name/`) and nested
 //! (`owner/group/subgroup/skill-name/`) layouts. Intermediate directories
 //! without `skill.toml` are recursed into up to `MAX_NESTING_DEPTH` levels
@@ -18,16 +18,16 @@ use crate::state::{
 use crate::validate;
 
 /// Maximum directory depth below an owner to search for skill directories.
-/// Prevents runaway recursion on malformed registry trees.
+/// Prevents runaway recursion on malformed repo trees.
 const MAX_NESTING_DEPTH: usize = 5;
 
-/// Load server configuration from the registry root.
+/// Load server configuration from the repo root.
 ///
 /// Looks for `skillet.toml` with a `[project]` section for the server name.
 /// If not present, returns sensible defaults. If the file exists but is
 /// malformed, returns an error.
-pub fn load_config(registry_path: &Path) -> crate::error::Result<ServerConfig> {
-    if let Some(manifest) = project::load_skillet_toml(registry_path)? {
+pub fn load_config(repo_path: &Path) -> crate::error::Result<ServerConfig> {
+    if let Some(manifest) = project::load_skillet_toml(repo_path)? {
         let name = manifest
             .project
             .as_ref()
@@ -44,11 +44,11 @@ pub fn load_config(registry_path: &Path) -> crate::error::Result<ServerConfig> {
     Ok(ServerConfig::default())
 }
 
-/// Load a skill index from a registry directory.
+/// Load a skill index from a repo directory.
 ///
 /// Supports both flat and nested layouts:
 /// ```text
-/// registry/
+/// repo/
 ///   owner1/
 ///     skill-a/          # flat: owner1/skill-a/
 ///       skill.toml
@@ -65,27 +65,27 @@ pub fn load_config(registry_path: &Path) -> crate::error::Result<ServerConfig> {
 /// Intermediate directories (without `skill.toml`) are recursed into up to
 /// `MAX_NESTING_DEPTH` levels. If two nested paths under the same owner
 /// produce the same skill name, the first one wins and a warning is logged.
-pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
+pub fn load_index(repo_path: &Path) -> crate::error::Result<SkillIndex> {
     let mut index = SkillIndex::default();
 
-    if !registry_path.is_dir() {
+    if !repo_path.is_dir() {
         return Err(Error::SkillLoad {
-            path: registry_path.to_path_buf(),
-            reason: "registry path does not exist or is not a directory".to_string(),
+            path: repo_path.to_path_buf(),
+            reason: "repo path does not exist or is not a directory".to_string(),
         });
     }
 
     // Check for skillet.toml with [skill] or [skills] sections.
     // This bridges npm-style skill repos (flat skills/<name>/ layout)
-    // so they work as registries without the owner/skill/ nesting.
-    if let Some(manifest) = project::load_skillet_toml(registry_path)?
+    // so they work as repos without the owner/skill/ nesting.
+    if let Some(manifest) = project::load_skillet_toml(repo_path)?
         && (manifest.skill.is_some() || manifest.skills.is_some())
     {
         tracing::info!(
-            path = %registry_path.display(),
+            path = %repo_path.display(),
             "Loading npm-style skill repo via skillet.toml manifest"
         );
-        let embedded = project::load_embedded_skills(registry_path, &manifest);
+        let embedded = project::load_embedded_skills(repo_path, &manifest);
         // Update category counts from embedded index
         for entry in embedded.skills.values() {
             if let Some(v) = entry.latest()
@@ -101,9 +101,9 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     }
 
     // Iterate over owner directories
-    let mut owners: Vec<_> = std::fs::read_dir(registry_path)
+    let mut owners: Vec<_> = std::fs::read_dir(repo_path)
         .map_err(|e| Error::FileRead {
-            path: registry_path.to_path_buf(),
+            path: repo_path.to_path_buf(),
             source: e,
         })?
         .filter_map(|e| e.ok())
@@ -133,15 +133,15 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
                 .to_string_lossy()
                 .to_string();
 
-            // Determine registry_path: None for flat (depth 1), Some for nested
+            // Determine repo_path: None for flat (depth 1), Some for nested
             let depth = rel_from_owner.components().count();
-            let registry_path_value = if depth > 1 {
-                // Full path from registry root: owner/group/.../skill-name
-                let full_rel = registry_path.join(&owner_name).join(rel_from_owner);
+            let repo_path_value = if depth > 1 {
+                // Full path from repo root: owner/group/.../skill-name
+                let full_rel = repo_path.join(&owner_name).join(rel_from_owner);
                 // Use forward slashes for portability
                 Some(
                     full_rel
-                        .strip_prefix(registry_path)
+                        .strip_prefix(repo_path)
                         .unwrap_or(&full_rel)
                         .to_string_lossy()
                         .replace('\\', "/"),
@@ -158,14 +158,14 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
                         tracing::warn!(
                             owner = %owner_name,
                             name = %skill_name,
-                            existing_path = ?existing.registry_path,
-                            new_path = ?registry_path_value,
+                            existing_path = ?existing.repo_path,
+                            new_path = ?repo_path_value,
                             "Duplicate skill name under same owner, keeping first"
                         );
                         continue;
                     }
 
-                    entry.registry_path = registry_path_value;
+                    entry.repo_path = repo_path_value;
 
                     // Update category counts
                     if let Some(v) = entry.latest()
@@ -194,12 +194,12 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
     // owner/name walk found nothing, try treating immediate children as skills
     // and infer the owner from the git remote (or fall back to the directory name).
     if index.skills.is_empty() {
-        let flat_skills = find_skill_dirs(registry_path, 0);
+        let flat_skills = find_skill_dirs(repo_path, 0);
         if !flat_skills.is_empty() {
-            // Walk up from registry_path to find the git root (handles subdir case)
-            let git_root = find_git_root(registry_path).unwrap_or(registry_path.to_path_buf());
+            // Walk up from repo_path to find the git root (handles subdir case)
+            let git_root = find_git_root(repo_path).unwrap_or(repo_path.to_path_buf());
             let owner = project::owner_from_git_remote(&git_root).unwrap_or_else(|| {
-                registry_path
+                repo_path
                     .file_name()
                     .unwrap_or_default()
                     .to_string_lossy()
@@ -232,7 +232,7 @@ pub fn load_index(registry_path: &Path) -> crate::error::Result<SkillIndex> {
                                 *index.categories.entry(cat.clone()).or_insert(0) += 1;
                             }
                         }
-                        entry.source = SkillSource::Registry;
+                        entry.source = SkillSource::Repo;
                         index.skills.insert(key, entry);
                     }
                     Err(e) => {
@@ -321,7 +321,7 @@ fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
 /// when `skill.toml` is present, or `validate::validate_skillpack_lenient()`
 /// for SKILL.md-only directories (zero-config mode).
 ///
-/// Then layers on registry-specific checks (owner/name match directory
+/// Then layers on repo-specific checks (owner/name match directory
 /// structure, versions.toml handling).
 ///
 /// If `versions.toml` exists, builds a multi-version `SkillEntry` with one
@@ -386,7 +386,7 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
     Ok(SkillEntry {
         owner: owner.to_string(),
         name: name.to_string(),
-        registry_path: None,
+        repo_path: None,
         versions,
         source: SkillSource::default(),
     })
@@ -630,13 +630,13 @@ pub fn guess_mime_type(filename: &str) -> String {
 mod tests {
     use super::*;
 
-    fn test_registry() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+    fn test_repo() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo")
     }
 
     #[test]
-    fn test_load_index_from_test_registry() {
-        let test_dir = test_registry();
+    fn test_load_index_from_test_repo() {
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -649,7 +649,7 @@ mod tests {
 
     #[test]
     fn test_multi_version_loading() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -690,7 +690,7 @@ mod tests {
 
     #[test]
     fn test_yanked_version_handling() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -713,7 +713,7 @@ mod tests {
 
     #[test]
     fn test_backward_compat_without_versions_toml() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -774,13 +774,13 @@ published = "2026-01-01T00:00:00Z"
     }
 
     #[test]
-    fn test_load_config_from_test_registry() {
-        let test_dir = test_registry();
+    fn test_load_config_from_test_repo() {
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
         let config = load_config(&test_dir).expect("Failed to load config");
-        // test-registry has a skillet.toml with [project] name = "skillet"
+        // test-repo has a skillet.toml with [project] name = "skillet"
         assert_eq!(config.name, "skillet");
     }
 
@@ -827,7 +827,7 @@ description = "A skill collection"
         let entry = SkillEntry {
             owner: "test".to_string(),
             name: "test".to_string(),
-            registry_path: None,
+            repo_path: None,
             source: SkillSource::default(),
             versions: vec![
                 SkillVersion {
@@ -886,7 +886,7 @@ description = "A skill collection"
 
     #[test]
     fn test_load_with_manifest_verified() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -905,7 +905,7 @@ description = "A skill collection"
 
     #[test]
     fn test_load_with_manifest_mismatch() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -924,7 +924,7 @@ description = "A skill collection"
 
     #[test]
     fn test_load_without_manifest() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -945,7 +945,7 @@ description = "A skill collection"
 
     #[test]
     fn test_nested_skill_discovery() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -976,7 +976,7 @@ description = "A skill collection"
 
     #[test]
     fn test_nested_skill_categories_indexed() {
-        let test_dir = test_registry();
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
@@ -996,32 +996,32 @@ description = "A skill collection"
     }
 
     #[test]
-    fn test_nested_registry_path_set() {
-        let test_dir = test_registry();
+    fn test_nested_repo_path_set() {
+        let test_dir = test_repo();
         if !test_dir.exists() {
             return;
         }
         let index = load_index(&test_dir).expect("Failed to load test index");
 
-        // Nested skills should have registry_path set
+        // Nested skills should have repo_path set
         let maven = index
             .skills
             .get(&("acme".to_string(), "maven-build".to_string()))
             .expect("maven-build should exist");
         assert_eq!(
-            maven.registry_path.as_deref(),
+            maven.repo_path.as_deref(),
             Some("acme/lang/java/maven-build"),
-            "nested skill should have registry_path set"
+            "nested skill should have repo_path set"
         );
 
-        // Flat skills should have registry_path = None
+        // Flat skills should have repo_path = None
         let python = index
             .skills
             .get(&("acme".to_string(), "python-dev".to_string()))
             .expect("python-dev should exist");
         assert_eq!(
-            python.registry_path, None,
-            "flat skill should have no registry_path"
+            python.repo_path, None,
+            "flat skill should have no repo_path"
         );
     }
 
@@ -1062,14 +1062,14 @@ description = "A skill collection"
                 .contains_key(&("myowner".to_string(), "nested-skill".to_string()))
         );
 
-        // Flat has no registry_path
+        // Flat has no repo_path
         let flat = &index.skills[&("myowner".to_string(), "flat-skill".to_string())];
-        assert_eq!(flat.registry_path, None);
+        assert_eq!(flat.repo_path, None);
 
-        // Nested has registry_path
+        // Nested has repo_path
         let nested = &index.skills[&("myowner".to_string(), "nested-skill".to_string())];
         assert_eq!(
-            nested.registry_path.as_deref(),
+            nested.repo_path.as_deref(),
             Some("myowner/group/nested-skill")
         );
     }
@@ -1161,8 +1161,8 @@ description = "A skill collection"
 
     // ── npm-style repo compatibility tests ───────────────────────────
 
-    fn test_npm_registry() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-npm-registry")
+    fn test_npm_repo() -> std::path::PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-npm-repo")
     }
 
     #[test]
@@ -1246,11 +1246,11 @@ path = "skills"
 
     #[test]
     fn test_load_index_npm_fixture() {
-        let npm_dir = test_npm_registry();
+        let npm_dir = test_npm_repo();
         if !npm_dir.exists() {
             return;
         }
-        let index = load_index(&npm_dir).expect("should load test-npm-registry");
+        let index = load_index(&npm_dir).expect("should load test-npm-repo");
 
         assert_eq!(index.skills.len(), 3, "should find 3 skills");
 
@@ -1423,7 +1423,7 @@ path = "skills"
         )
         .unwrap();
 
-        // load_index is called with the subdirectory (as registry.rs does)
+        // load_index is called with the subdirectory (as repo.rs does)
         let index = load_index(&skills_dir).expect("should load flat repo from subdir");
         assert_eq!(index.skills.len(), 1);
         assert!(

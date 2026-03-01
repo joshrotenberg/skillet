@@ -1,19 +1,19 @@
-//! Registry management: initialization, loading, and utility functions.
+//! Repo management: initialization, loading, and utility functions.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::cache::{self, RegistrySource};
+use crate::cache::{self, RepoSource};
 use crate::config::SkilletConfig;
 use crate::error::Error;
 use crate::state::SkillIndex;
 use crate::{git, index};
 
-/// The official default registry, used when no registries are configured.
-pub const DEFAULT_REGISTRY_URL: &str = "https://github.com/joshrotenberg/skillet.git";
+/// The official default repo, used when no repos are configured.
+pub const DEFAULT_REPO_URL: &str = "https://github.com/joshrotenberg/skillet.git";
 
-/// Subdirectory within the official registry repo that contains skills.
-pub const DEFAULT_REGISTRY_SUBDIR: &str = "registry";
+/// Subdirectory within the official repo that contains skills.
+pub const DEFAULT_REPO_SUBDIR: &str = "registry";
 
 /// Parse a human-friendly duration string like "5m", "1h", "30s", or "0".
 pub fn parse_duration(s: &str) -> crate::error::Result<Duration> {
@@ -64,7 +64,7 @@ pub fn cache_dir_for_url(base: &Path, url: &str) -> PathBuf {
     base.join(slug)
 }
 
-/// Default cache directory for cloned remote registries.
+/// Default cache directory for cloned remote repos.
 pub fn default_cache_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
         PathBuf::from(home).join(".cache").join("skillet")
@@ -73,24 +73,24 @@ pub fn default_cache_dir() -> PathBuf {
     }
 }
 
-/// Load and merge registries from CLI flags and/or config file.
+/// Load and merge repos from CLI flags and/or config file.
 ///
-/// Priority: if any flags are provided (`registry_flags` or `remote_flags`),
-/// use only those. Otherwise fall back to the config file's registries.
-/// Errors if no registries are available from either source.
+/// Priority: if any flags are provided (`repo_flags` or `remote_flags`),
+/// use only those. Otherwise fall back to the config file's repos.
+/// Errors if no repos are available from either source.
 ///
-/// Returns the merged skill index and the list of registry paths used
-/// (needed for registry identification in the installation manifest).
-pub fn load_registries(
-    registry_flags: &[PathBuf],
+/// Returns the merged skill index and the list of repo paths used
+/// (needed for repo identification in the installation manifest).
+pub fn load_repos(
+    repo_flags: &[PathBuf],
     remote_flags: &[String],
     config: &SkilletConfig,
     subdir: Option<&Path>,
 ) -> crate::error::Result<(SkillIndex, Vec<PathBuf>)> {
-    let has_flags = !registry_flags.is_empty() || !remote_flags.is_empty();
+    let has_flags = !repo_flags.is_empty() || !remote_flags.is_empty();
 
     let (local_paths, remote_urls): (Vec<PathBuf>, Vec<&str>) = if has_flags {
-        let locals: Vec<PathBuf> = registry_flags
+        let locals: Vec<PathBuf> = repo_flags
             .iter()
             .map(|p| match subdir {
                 Some(sub) => p.join(sub),
@@ -101,7 +101,7 @@ pub fn load_registries(
         (locals, remotes)
     } else {
         let locals: Vec<PathBuf> = config
-            .registries
+            .repos
             .local
             .iter()
             .map(|p| match subdir {
@@ -109,26 +109,21 @@ pub fn load_registries(
                 None => p.clone(),
             })
             .collect();
-        let remotes: Vec<&str> = config
-            .registries
-            .remote
-            .iter()
-            .map(|s| s.as_str())
-            .collect();
+        let remotes: Vec<&str> = config.repos.remote.iter().map(|s| s.as_str()).collect();
         (locals, remotes)
     };
 
-    // Fall back to the official registry if nothing is configured
+    // Fall back to the official repo if nothing is configured
     let default_remote;
     let remote_urls = if local_paths.is_empty() && remote_urls.is_empty() {
-        default_remote = DEFAULT_REGISTRY_URL.to_string();
+        default_remote = DEFAULT_REPO_URL.to_string();
         vec![default_remote.as_str()]
     } else {
         remote_urls
     };
 
     let cache_base = default_cache_dir();
-    let mut registry_paths = Vec::new();
+    let mut repo_paths = Vec::new();
 
     let cache_enabled = config.cache.enabled;
     let cache_ttl = if cache_enabled {
@@ -139,10 +134,10 @@ pub fn load_registries(
 
     let mut merged = SkillIndex::default();
 
-    // Load local registries
+    // Load local repos
     for path in &local_paths {
-        registry_paths.push(path.clone());
-        let source = RegistrySource::Local(path.clone());
+        repo_paths.push(path.clone());
+        let source = RepoSource::Local(path.clone());
 
         if cache_enabled && let Some(idx) = cache::load(&source, cache_ttl) {
             merged.merge(idx);
@@ -156,7 +151,7 @@ pub fn load_registries(
         merged.merge(idx);
     }
 
-    // Clone/pull remote registries
+    // Clone/pull remote repos
     for url in &remote_urls {
         let target = cache_dir_for_url(&cache_base, url);
         if let Some(parent) = target.parent() {
@@ -165,12 +160,12 @@ pub fn load_registries(
         git::clone_or_pull(url, &target)?;
         let path = match subdir {
             Some(sub) => target.join(sub),
-            None if *url == DEFAULT_REGISTRY_URL => target.join(DEFAULT_REGISTRY_SUBDIR),
+            None if *url == DEFAULT_REPO_URL => target.join(DEFAULT_REPO_SUBDIR),
             None => target.clone(),
         };
-        registry_paths.push(path.clone());
+        repo_paths.push(path.clone());
 
-        let source = RegistrySource::Remote {
+        let source = RepoSource::Remote {
             url: url.to_string(),
             checkout: target,
         };
@@ -187,13 +182,13 @@ pub fn load_registries(
         merged.merge(idx);
     }
 
-    Ok((merged, registry_paths))
+    Ok((merged, repo_paths))
 }
 
-/// Identify a registry for manifest entries.
+/// Identify a repo for manifest entries.
 ///
-/// Returns the git URL as-is for remotes, `local:<abs_path>` for local registries.
-pub fn registry_id(path: &Path, remote_urls: &[String]) -> String {
+/// Returns the git URL as-is for remotes, `local:<abs_path>` for local repos.
+pub fn repo_id(path: &Path, remote_urls: &[String]) -> String {
     // Check if this path is a cached clone of a remote
     let cache_base = default_cache_dir();
     for url in remote_urls {
@@ -291,25 +286,25 @@ mod tests {
     }
 
     #[test]
-    fn test_registry_id_local() {
+    fn test_repo_id_local() {
         let path = PathBuf::from("/home/user/my-registry");
-        let id = registry_id(&path, &[]);
+        let id = repo_id(&path, &[]);
         assert_eq!(id, "local:/home/user/my-registry");
     }
 
     #[test]
-    fn test_registry_id_remote() {
+    fn test_repo_id_remote() {
         let url = "https://github.com/owner/repo.git".to_string();
         let cache_base = default_cache_dir();
         let cached_path = cache_dir_for_url(&cache_base, &url);
 
-        let id = registry_id(&cached_path, std::slice::from_ref(&url));
+        let id = repo_id(&cached_path, std::slice::from_ref(&url));
         assert_eq!(id, url);
     }
 
     #[test]
-    fn test_default_registry_url_is_set() {
-        assert!(!DEFAULT_REGISTRY_URL.is_empty());
-        assert!(DEFAULT_REGISTRY_URL.ends_with(".git"));
+    fn test_default_repo_url_is_set() {
+        assert!(!DEFAULT_REPO_URL.is_empty());
+        assert!(DEFAULT_REPO_URL.ends_with(".git"));
     }
 }

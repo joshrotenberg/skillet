@@ -16,9 +16,9 @@ use crate::state::SkillVersion;
 pub struct InstallOptions {
     pub targets: Vec<InstallTarget>,
     pub global: bool,
-    /// Registry identifier for the manifest entry.
-    /// Git URL for remotes, `local:<abs_path>` for local registries.
-    pub registry: String,
+    /// Repo identifier for the manifest entry.
+    /// Git URL for remotes, `local:<abs_path>` for local repos.
+    pub repo: String,
 }
 
 /// Result of installing a skill to a single target.
@@ -64,7 +64,7 @@ pub fn install_skill(
             owner: owner.to_string(),
             name: name.to_string(),
             version: version.version.clone(),
-            registry: options.registry.clone(),
+            repo: options.repo.clone(),
             checksum: checksum.clone(),
             installed_to: abs_dir.clone(),
             installed_at: now.clone(),
@@ -206,7 +206,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: skill_dir,
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -252,7 +252,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: dir1.clone(),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -261,7 +261,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: dir2.clone(),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -306,7 +306,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "https://github.com/owner/repo.git".to_string(),
+            repo: "https://github.com/owner/repo.git".to_string(),
             checksum: checksum.clone(),
             installed_to: skill_dir,
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -382,7 +382,7 @@ mod tests {
         let options = InstallOptions {
             targets: vec![InstallTarget::Agents],
             global: false,
-            registry: "local:/test".to_string(),
+            repo: "local:/test".to_string(),
         };
 
         // install_skill resolves relative paths via cwd. We'll use
@@ -396,7 +396,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: version.version.clone(),
-            registry: options.registry.clone(),
+            repo: options.repo.clone(),
             checksum,
             installed_to: target_dir.clone(),
             installed_at: config::now_iso8601(),
@@ -406,7 +406,7 @@ mod tests {
         assert!(files.contains(&"scripts/lint.sh".to_string()));
         assert!(files.contains(&"references/guide.md".to_string()));
         assert_eq!(manifest.skills.len(), 1);
-        assert_eq!(manifest.skills[0].registry, "local:/test");
+        assert_eq!(manifest.skills[0].repo, "local:/test");
     }
 
     #[test]
