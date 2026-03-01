@@ -141,26 +141,54 @@ pub struct UninstallResult {
 /// Finds all installations of `owner/name` in the manifest, removes the
 /// installed directories, and removes the manifest entries. Does NOT call
 /// `manifest::save()` -- the caller should save once after completion.
+/// Options controlling how a skill is uninstalled.
+#[derive(Default)]
+pub struct UninstallOptions {
+    /// Only remove installations under this directory.
+    /// When `None`, uses the current working directory.
+    pub scope: Option<PathBuf>,
+}
+
 pub fn uninstall_skill(
     owner: &str,
     name: &str,
     manifest: &mut crate::manifest::InstalledManifest,
+    options: &UninstallOptions,
 ) -> crate::error::Result<UninstallResult> {
-    let entries: Vec<PathBuf> = manifest
+    let scope = match &options.scope {
+        Some(p) => p.clone(),
+        None => std::env::current_dir().map_err(Error::CurrentDir)?,
+    };
+
+    let all_entries: Vec<PathBuf> = manifest
         .find_by_skill(owner, name)
         .iter()
         .map(|e| e.installed_to.clone())
         .collect();
 
-    if entries.is_empty() {
+    if all_entries.is_empty() {
         return Err(Error::Other(format!(
             "skill '{owner}/{name}' is not installed"
         )));
     }
 
+    // Only remove entries under the scoped directory.
+    let scoped_entries: Vec<PathBuf> = all_entries
+        .iter()
+        .filter(|p| p.starts_with(&scope))
+        .cloned()
+        .collect();
+
+    if scoped_entries.is_empty() {
+        return Err(Error::Other(format!(
+            "skill '{owner}/{name}' is not installed in {}",
+            scope.display()
+        )));
+    }
+
     let mut removed_paths = Vec::new();
 
-    for path in &entries {
+    for path in &scoped_entries {
         if path.is_dir() {
             std::fs::remove_dir_all(path).map_err(|e| Error::Io {
                 context: format!("failed to remove {}", path.display()),
@@ -505,7 +533,10 @@ mod tests {
             installed_at: "2026-01-01T00:00:00Z".to_string(),
         });
 
-        let result = uninstall_skill("testowner", "test-skill", &mut manifest).unwrap();
+        let opts = UninstallOptions {
+            scope: Some(tmp.path().to_path_buf()),
+        };
+        let result = uninstall_skill("testowner", "test-skill", &mut manifest, &opts).unwrap();
         assert_eq!(result.removed_paths, vec![skill_dir.clone()]);
         assert!(manifest.skills.is_empty());
         assert!(!skill_dir.exists());
@@ -513,8 +544,12 @@ mod tests {
 
     #[test]
     fn test_uninstall_not_installed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let opts = UninstallOptions {
+            scope: Some(tmp.path().to_path_buf()),
+        };
         let mut manifest = InstalledManifest::default();
-        let result = uninstall_skill("nobody", "nothing", &mut manifest);
+        let result = uninstall_skill("nobody", "nothing", &mut manifest, &opts);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("not installed"));
     }
@@ -542,10 +577,52 @@ mod tests {
             });
         }
 
-        let result = uninstall_skill("testowner", "test-skill", &mut manifest).unwrap();
+        let opts = UninstallOptions {
+            scope: Some(tmp.path().to_path_buf()),
+        };
+        let result = uninstall_skill("testowner", "test-skill", &mut manifest, &opts).unwrap();
         assert_eq!(result.removed_paths.len(), 2);
         assert!(manifest.skills.is_empty());
         assert!(!dir1.exists());
         assert!(!dir2.exists());
+    }
+
+    #[test]
+    fn test_uninstall_scoped_to_directory() {
+        let tmp = tempfile::tempdir().unwrap();
+        let version = sample_version();
+        let mut manifest = InstalledManifest::default();
+
+        // Install in two different project directories
+        let project_a = tmp.path().join("project-a");
+        let project_b = tmp.path().join("project-b");
+        let dir_a = project_a.join(".agents/skills/test-skill");
+        let dir_b = project_b.join(".agents/skills/test-skill");
+        write_skill_to_dir(&version, &dir_a).unwrap();
+        write_skill_to_dir(&version, &dir_b).unwrap();
+
+        for dir in [&dir_a, &dir_b] {
+            manifest.upsert(InstalledSkill {
+                owner: "testowner".to_string(),
+                name: "test-skill".to_string(),
+                version: "1.0.0".to_string(),
+                repo: "local:/tmp".to_string(),
+                checksum: integrity::sha256_hex(&version.skill_md),
+                installed_to: dir.clone(),
+                installed_at: "2026-01-01T00:00:00Z".to_string(),
+            });
+        }
+
+        // Uninstall scoped to project-a only
+        let opts = UninstallOptions {
+            scope: Some(project_a.clone()),
+        };
+        let result = uninstall_skill("testowner", "test-skill", &mut manifest, &opts).unwrap();
+        assert_eq!(result.removed_paths, vec![dir_a.clone()]);
+        assert!(!dir_a.exists());
+        // project-b should be untouched
+        assert!(dir_b.exists());
+        assert_eq!(manifest.skills.len(), 1);
+        assert_eq!(manifest.skills[0].installed_to, dir_b);
     }
 }

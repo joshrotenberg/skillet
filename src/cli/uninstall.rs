@@ -23,7 +23,8 @@ pub(crate) fn run_uninstall(args: UninstallArgs) -> ExitCode {
         }
     };
 
-    let result = match install::uninstall_skill(owner, name, &mut installed_manifest) {
+    let opts = install::UninstallOptions::default();
+    let result = match install::uninstall_skill(owner, name, &mut installed_manifest, &opts) {
         Ok(r) => r,
         Err(e) => {
             eprintln!("Error: {e}");
