@@ -62,6 +62,8 @@ enum Command {
     Trust(TrustArgs),
     /// Audit installed skills against pinned content hashes
     Audit(AuditArgs),
+    /// Manage configured repos
+    Repo(RepoCommand),
     /// Generate initial configuration
     Setup(SetupArgs),
 }
@@ -288,6 +290,34 @@ struct AuditArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct RepoCommand {
+    #[command(subcommand)]
+    action: RepoAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum RepoAction {
+    /// Add a repo (local path or remote URL)
+    Add(RepoAddArgs),
+    /// Remove a repo (local path or remote URL)
+    Remove(RepoRemoveArgs),
+    /// List configured repos
+    List,
+}
+
+#[derive(clap::Args, Debug)]
+struct RepoAddArgs {
+    /// Repo to add (local path or remote URL)
+    repo: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct RepoRemoveArgs {
+    /// Repo to remove (local path or remote URL)
+    repo: String,
+}
+
+#[derive(clap::Args, Debug)]
 struct SetupArgs {
     /// Git URL of a remote repo to add (can be specified multiple times)
     #[arg(long)]
@@ -327,6 +357,7 @@ async fn main() -> ExitCode {
         Some(Command::List(args)) => cli::search::run_list(args),
         Some(Command::Trust(args)) => cli::trust::run_trust(args),
         Some(Command::Audit(args)) => cli::trust::run_audit(args),
+        Some(Command::Repo(args)) => cli::repo::run_repo(args),
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,

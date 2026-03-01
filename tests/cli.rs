@@ -244,7 +244,9 @@ fn uninstall_removes_installed_skill() {
         .current_dir(tmp.path())
         .assert()
         .success()
-        .stdout(predicate::str::contains("Uninstalled joshrotenberg/rust-dev"));
+        .stdout(predicate::str::contains(
+            "Uninstalled joshrotenberg/rust-dev",
+        ));
 
     // Files should be gone
     assert!(!skill_md.exists(), "SKILL.md should be removed");
@@ -451,6 +453,128 @@ fn setup_no_official_repo() {
         !content.contains("joshrotenberg/skillet.git"),
         "config should NOT contain official repo URL: {content}"
     );
+}
+
+// ── Repo management ─────────────────────────────────────────
+
+#[test]
+fn repo_add_and_list() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Add a remote repo
+    skillet()
+        .args(["repo", "add", "https://github.com/example/skills.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added repo"));
+
+    // List should show it
+    skillet()
+        .args(["repo", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "https://github.com/example/skills.git",
+        ));
+
+    // Add a local repo
+    skillet()
+        .args(["repo", "add", "/tmp/local-repo"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Added repo"));
+
+    // List should show both
+    skillet()
+        .args(["repo", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("https://github.com/example/skills.git")
+                .and(predicate::str::contains("/tmp/local-repo")),
+        );
+}
+
+#[test]
+fn repo_add_duplicate() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["repo", "add", "https://github.com/example/skills.git"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["repo", "add", "https://github.com/example/skills.git"])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("already configured"));
+}
+
+#[test]
+fn repo_remove() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["repo", "add", "https://github.com/example/skills.git"])
+        .env("HOME", &home)
+        .assert()
+        .success();
+
+    skillet()
+        .args(["repo", "remove", "https://github.com/example/skills.git"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Removed repo"));
+
+    // List should be empty now
+    skillet()
+        .args(["repo", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No repos configured"));
+}
+
+#[test]
+fn repo_remove_not_found() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["repo", "remove", "https://github.com/nobody/nothing.git"])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not found"));
+}
+
+#[test]
+fn repo_list_empty() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["repo", "list"])
+        .env("HOME", &home)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No repos configured"));
 }
 
 // ── npm-style repo tests ─────────────────────────────────────

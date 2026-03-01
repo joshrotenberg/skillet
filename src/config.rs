@@ -326,6 +326,39 @@ pub fn write_config(config: &SkilletConfig) -> crate::error::Result<PathBuf> {
     Ok(path)
 }
 
+/// Add a remote repo URL to the config. Returns false if already present.
+pub fn add_remote(config: &mut SkilletConfig, url: &str) -> bool {
+    if config.repos.remote.iter().any(|r| r == url) {
+        return false;
+    }
+    config.repos.remote.push(url.to_string());
+    true
+}
+
+/// Add a local repo path to the config. Returns false if already present.
+pub fn add_local(config: &mut SkilletConfig, path: &Path) -> bool {
+    let canonical = path.to_path_buf();
+    if config.repos.local.iter().any(|p| p == &canonical) {
+        return false;
+    }
+    config.repos.local.push(canonical);
+    true
+}
+
+/// Remove a remote repo URL from the config. Returns false if not found.
+pub fn remove_remote(config: &mut SkilletConfig, url: &str) -> bool {
+    let before = config.repos.remote.len();
+    config.repos.remote.retain(|r| r != url);
+    config.repos.remote.len() < before
+}
+
+/// Remove a local repo path from the config. Returns false if not found.
+pub fn remove_local(config: &mut SkilletConfig, path: &Path) -> bool {
+    let before = config.repos.local.len();
+    config.repos.local.retain(|p| p != path);
+    config.repos.local.len() < before
+}
+
 /// Current time as ISO 8601 string (UTC).
 ///
 /// Uses `std::time` to avoid adding a chrono dependency.
@@ -671,5 +704,41 @@ discover_local = false
 
         let config = load_config_from(&path).unwrap();
         assert!(!config.server.discover_local);
+    }
+
+    #[test]
+    fn test_add_remote_deduplicates() {
+        let mut config = SkilletConfig::default();
+        assert!(add_remote(&mut config, "https://github.com/a/b.git"));
+        assert!(!add_remote(&mut config, "https://github.com/a/b.git"));
+        assert_eq!(config.repos.remote.len(), 1);
+    }
+
+    #[test]
+    fn test_add_local_deduplicates() {
+        let mut config = SkilletConfig::default();
+        let path = PathBuf::from("/tmp/repo");
+        assert!(add_local(&mut config, &path));
+        assert!(!add_local(&mut config, &path));
+        assert_eq!(config.repos.local.len(), 1);
+    }
+
+    #[test]
+    fn test_remove_remote() {
+        let mut config = SkilletConfig::default();
+        add_remote(&mut config, "https://example.com/repo.git");
+        assert!(remove_remote(&mut config, "https://example.com/repo.git"));
+        assert!(config.repos.remote.is_empty());
+        assert!(!remove_remote(&mut config, "https://example.com/repo.git"));
+    }
+
+    #[test]
+    fn test_remove_local() {
+        let mut config = SkilletConfig::default();
+        let path = PathBuf::from("/tmp/repo");
+        add_local(&mut config, &path);
+        assert!(remove_local(&mut config, &path));
+        assert!(config.repos.local.is_empty());
+        assert!(!remove_local(&mut config, &path));
     }
 }
