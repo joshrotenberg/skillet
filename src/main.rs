@@ -146,10 +146,6 @@ struct InitProjectArgs {
     /// Include a \[skills\] section for multiple skills
     #[arg(long)]
     multi: bool,
-
-    /// Include a \[registry\] section
-    #[arg(long)]
-    registry: bool,
 }
 
 /// Shared registry source arguments for CLI subcommands.
@@ -387,8 +383,7 @@ impl ServerCapabilities {
 
 /// Build an MCP router from a loaded AppState and resolved capabilities.
 fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
-    let mut router =
-        McpRouter::new().server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"));
+    let mut router = McpRouter::new().server_info(&state.config.name, env!("CARGO_PKG_VERSION"));
 
     // Register tools conditionally
     if caps.tools.contains("search") {
@@ -640,7 +635,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
 
     // Load and merge all registries
     let mut merged_index = state::SkillIndex::default();
-    let mut config = state::RegistryConfig::default();
+    let mut config = state::ServerConfig::default();
 
     for (i, path) in registry_paths.iter().enumerate() {
         if i == 0 {
@@ -695,15 +690,13 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         config,
     );
 
-    // Determine refresh interval: CLI flag wins, then registry defaults, then "5m"
+    // Determine refresh interval: CLI flag wins, then server config, then "5m"
     let effective_interval = if args.refresh_interval == "5m" {
-        // CLI is at default -- check registry config for an override
+        // CLI is at default -- check server config for an override
         state
             .config
-            .registry
-            .defaults
-            .as_ref()
-            .and_then(|d| d.refresh_interval.as_deref())
+            .refresh_interval
+            .as_deref()
             .unwrap_or("5m")
             .to_string()
     } else {

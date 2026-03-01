@@ -53,8 +53,6 @@ pub struct InitProjectOptions<'a> {
     pub include_skill: bool,
     /// Include a `[skills]` section
     pub include_multi: bool,
-    /// Include a `[registry]` section
-    pub include_registry: bool,
 }
 
 /// Generate a `skillet.toml` project manifest at the given path.
@@ -145,17 +143,6 @@ fn render_skillet_toml(opts: &InitProjectOptions) -> String {
         content.push_str("\n[skills]\npath = \".skillet\"\n");
     }
 
-    // [registry] section
-    if opts.include_registry {
-        content.push_str(&format!(
-            "\n[registry]\nname = \"{name}\"\nversion = 1\n",
-            name = opts.name
-        ));
-        if let Some(desc) = opts.description {
-            content.push_str(&format!("description = \"{desc}\"\n"));
-        }
-    }
-
     content
 }
 
@@ -173,7 +160,6 @@ mod tests {
             description: Some("A test project"),
             include_skill: false,
             include_multi: false,
-            include_registry: false,
         };
 
         init_project(path, &opts).unwrap();
@@ -203,7 +189,6 @@ mod tests {
             description: Some("A CLI tool"),
             include_skill: true,
             include_multi: false,
-            include_registry: false,
         };
 
         init_project(path, &opts).unwrap();
@@ -230,7 +215,6 @@ mod tests {
             description: None,
             include_skill: false,
             include_multi: true,
-            include_registry: false,
         };
 
         init_project(path, &opts).unwrap();
@@ -241,31 +225,6 @@ mod tests {
 
         // .skillet/ directory should be created
         assert!(path.join(".skillet").is_dir());
-    }
-
-    #[test]
-    fn test_init_project_with_registry() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path();
-
-        let opts = InitProjectOptions {
-            name: "my-registry",
-            description: Some("Skills registry"),
-            include_skill: false,
-            include_multi: false,
-            include_registry: true,
-        };
-
-        init_project(path, &opts).unwrap();
-
-        let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
-        assert!(content.contains("[registry]"));
-        assert!(content.contains("version = 1"));
-
-        // Should be loadable as a registry config
-        let manifest = crate::project::load_skillet_toml(path).unwrap().unwrap();
-        let config = manifest.into_registry_config().unwrap();
-        assert_eq!(config.registry.name, "my-registry");
     }
 
     #[test]
@@ -281,7 +240,6 @@ mod tests {
             description: None,
             include_skill: false,
             include_multi: false,
-            include_registry: false,
         };
 
         let result = init_project(path, &opts);

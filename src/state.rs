@@ -19,8 +19,8 @@ pub struct AppState {
     pub registry_paths: Vec<PathBuf>,
     /// Remote URLs (for cache key generation)
     pub remote_urls: Vec<String>,
-    /// Registry configuration (from skillet.toml or defaults)
-    pub config: RegistryConfig,
+    /// Server configuration (name and refresh interval)
+    pub config: ServerConfig,
 }
 
 impl AppState {
@@ -29,7 +29,7 @@ impl AppState {
         remote_urls: Vec<String>,
         index: SkillIndex,
         search: SkillSearch,
-        config: RegistryConfig,
+        config: ServerConfig,
     ) -> Arc<Self> {
         Arc::new(Self {
             index: RwLock::new(index),
@@ -41,94 +41,24 @@ impl AppState {
     }
 }
 
-/// Top-level registry configuration, parsed from `skillet.toml`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryConfig {
-    pub registry: RegistryInfo,
-}
-
-impl Default for RegistryConfig {
-    fn default() -> Self {
-        Self {
-            registry: RegistryInfo {
-                name: default_registry_name(),
-                version: default_registry_version(),
-                description: None,
-                maintainer: None,
-                urls: None,
-                auth: None,
-                suggests: None,
-                defaults: None,
-            },
-        }
-    }
-}
-
-/// Core registry metadata.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryInfo {
-    #[serde(default = "default_registry_name")]
+/// Server configuration derived from the first registry's skillet.toml.
+///
+/// Used for MCP server name and refresh interval defaults.
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    /// Server name (defaults to "skillet")
     pub name: String,
-    #[serde(default = "default_registry_version")]
-    pub version: u32,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub maintainer: Option<RegistryMaintainer>,
-    #[serde(default)]
-    pub urls: Option<RegistryUrls>,
-    #[serde(default)]
-    pub auth: Option<RegistryAuth>,
-    #[serde(default)]
-    pub suggests: Option<Vec<RegistrySuggestion>>,
-    #[serde(default)]
-    pub defaults: Option<RegistryDefaults>,
-}
-
-/// Registry maintainer information.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryMaintainer {
-    pub name: Option<String>,
-    pub github: Option<String>,
-    pub email: Option<String>,
-}
-
-/// A suggested registry for discovery (lightweight federation).
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistrySuggestion {
-    pub url: String,
-    pub description: Option<String>,
-}
-
-/// Server defaults that a registry can specify.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryDefaults {
+    /// Default refresh interval (e.g. "5m", "1h")
     pub refresh_interval: Option<String>,
 }
 
-/// Optional URL endpoints for non-git-backed registries.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryUrls {
-    pub download: Option<String>,
-    pub api: Option<String>,
-}
-
-/// Optional auth configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryAuth {
-    #[serde(default)]
-    pub required: bool,
-}
-
-fn default_registry_name() -> String {
-    "skillet".to_string()
-}
-
-fn default_registry_version() -> u32 {
-    1
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            name: "skillet".to_string(),
+            refresh_interval: None,
+        }
+    }
 }
 
 /// In-memory index of all skills across all registries
@@ -791,14 +721,12 @@ mod tests {
         assert_eq!(summary.source_label, Some("local (claude)".into()));
     }
 
-    // -- RegistryConfig default --
+    // -- ServerConfig default --
 
     #[test]
-    fn registry_config_default() {
-        let config = RegistryConfig::default();
-        assert_eq!(config.registry.name, "skillet");
-        assert_eq!(config.registry.version, 1);
-        assert!(config.registry.description.is_none());
-        assert!(config.registry.maintainer.is_none());
+    fn server_config_default() {
+        let config = ServerConfig::default();
+        assert_eq!(config.name, "skillet");
+        assert!(config.refresh_interval.is_none());
     }
 }

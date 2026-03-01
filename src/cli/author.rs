@@ -141,7 +141,6 @@ pub(crate) fn run_init_project(args: InitProjectArgs) -> ExitCode {
         description: args.description.as_deref(),
         include_skill: args.skill,
         include_multi: args.multi,
-        include_registry: args.registry,
     };
 
     if let Err(e) = scaffold::init_project(path, &opts) {
@@ -157,9 +156,6 @@ pub(crate) fn run_init_project(args: InitProjectArgs) -> ExitCode {
     }
     if args.multi {
         println!("  [skills] .............. included (.skillet/)");
-    }
-    if args.registry {
-        println!("  [registry] ............ included");
     }
     println!();
     println!("Next steps:");

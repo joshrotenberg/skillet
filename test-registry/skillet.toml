@@ -1,15 +1,7 @@
-[registry]
+[project]
 name = "skillet"
-version = 1
 description = "Test registry for skillet development"
 
-[registry.maintainer]
+[[project.authors]]
 name = "Josh Rotenberg"
 github = "joshrotenberg"
-
-[[registry.suggests]]
-url = "https://github.com/joshrotenberg/skillet.git"
-description = "Official community skills"
-
-[registry.defaults]
-refresh_interval = "10m"

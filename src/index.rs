@@ -12,7 +12,7 @@ use crate::error::Error;
 use crate::integrity;
 use crate::project;
 use crate::state::{
-    RegistryConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
+    ServerConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
     VersionsManifest,
 };
 use crate::validate;
@@ -21,21 +21,27 @@ use crate::validate;
 /// Prevents runaway recursion on malformed registry trees.
 const MAX_NESTING_DEPTH: usize = 5;
 
-/// Load registry configuration from the registry root.
+/// Load server configuration from the registry root.
 ///
-/// Looks for `skillet.toml` with a `[registry]` section. If not present,
-/// returns sensible defaults. If the file exists but is malformed, returns
-/// an error.
-pub fn load_config(registry_path: &Path) -> crate::error::Result<RegistryConfig> {
-    if let Some(manifest) = project::load_skillet_toml(registry_path)?
-        && let Some(config) = manifest.into_registry_config()
-    {
-        tracing::info!(name = %config.registry.name, "Loaded registry config from skillet.toml");
-        return Ok(config);
+/// Looks for `skillet.toml` with a `[project]` section for the server name.
+/// If not present, returns sensible defaults. If the file exists but is
+/// malformed, returns an error.
+pub fn load_config(registry_path: &Path) -> crate::error::Result<ServerConfig> {
+    if let Some(manifest) = project::load_skillet_toml(registry_path)? {
+        let name = manifest
+            .project
+            .as_ref()
+            .and_then(|p| p.name.clone())
+            .unwrap_or_else(|| "skillet".to_string());
+        tracing::info!(%name, "Loaded server config from skillet.toml");
+        return Ok(ServerConfig {
+            name,
+            refresh_interval: None,
+        });
     }
 
-    tracing::debug!("No skillet.toml [registry] found, using defaults");
-    Ok(RegistryConfig::default())
+    tracing::debug!("No skillet.toml found, using defaults");
+    Ok(ServerConfig::default())
 }
 
 /// Load a skill index from a registry directory.
@@ -774,70 +780,33 @@ published = "2026-01-01T00:00:00Z"
             return;
         }
         let config = load_config(&test_dir).expect("Failed to load config");
-        assert_eq!(config.registry.name, "skillet");
-        assert_eq!(config.registry.version, 1);
-
-        // New extended fields
-        assert_eq!(
-            config.registry.description.as_deref(),
-            Some("Test registry for skillet development")
-        );
-
-        let maintainer = config.registry.maintainer.as_ref().unwrap();
-        assert_eq!(maintainer.name.as_deref(), Some("Josh Rotenberg"));
-        assert_eq!(maintainer.github.as_deref(), Some("joshrotenberg"));
-        assert!(maintainer.email.is_none());
-
-        let suggests = config.registry.suggests.as_ref().unwrap();
-        assert_eq!(suggests.len(), 1);
-        assert!(suggests[0].url.contains("skillet"));
-        assert!(suggests[0].description.is_some());
-
-        let defaults = config.registry.defaults.as_ref().unwrap();
-        assert_eq!(defaults.refresh_interval.as_deref(), Some("10m"));
+        // test-registry has a skillet.toml with [project] name = "skillet"
+        assert_eq!(config.name, "skillet");
     }
 
     #[test]
     fn test_load_config_default_when_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let config = load_config(tmp.path()).expect("Failed to get default config");
-        assert_eq!(config.registry.name, "skillet");
-        assert_eq!(config.registry.version, 1);
-        assert!(config.registry.urls.is_none());
-        assert!(config.registry.auth.is_none());
-        assert!(config.registry.description.is_none());
-        assert!(config.registry.maintainer.is_none());
-        assert!(config.registry.suggests.is_none());
-        assert!(config.registry.defaults.is_none());
+        assert_eq!(config.name, "skillet");
+        assert!(config.refresh_interval.is_none());
     }
 
     #[test]
-    fn test_load_config_with_full_fields() {
+    fn test_load_config_with_project_name() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(
             tmp.path().join("skillet.toml"),
             r#"
-[registry]
-name = "my-private-registry"
-version = 1
-
-[registry.urls]
-download = "https://skills.example.com/packages/{owner}/{name}/{version}.tar.gz"
-api = "https://skills.example.com/api/v1"
-
-[registry.auth]
-required = true
+[project]
+name = "my-skills"
+description = "A skill collection"
 "#,
         )
         .unwrap();
 
-        let config = load_config(tmp.path()).expect("Failed to parse full config");
-        assert_eq!(config.registry.name, "my-private-registry");
-        assert_eq!(config.registry.version, 1);
-        let urls = config.registry.urls.unwrap();
-        assert!(urls.download.unwrap().contains("example.com"));
-        assert!(urls.api.unwrap().contains("api/v1"));
-        assert!(config.registry.auth.unwrap().required);
+        let config = load_config(tmp.path()).expect("Failed to parse config");
+        assert_eq!(config.name, "my-skills");
     }
 
     #[test]
@@ -851,114 +820,6 @@ required = true
 
         let result = load_config(tmp.path());
         assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_load_config_with_all_extended_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            r#"
-[registry]
-name = "acme-team-skills"
-version = 1
-description = "Internal Python and DevOps skills"
-
-[registry.maintainer]
-name = "Jane Doe"
-github = "janedoe"
-email = "jane@example.com"
-
-[registry.urls]
-download = "https://skills.example.com/packages"
-api = "https://skills.example.com/api/v1"
-
-[registry.auth]
-required = true
-
-[[registry.suggests]]
-url = "https://github.com/joshrotenberg/skillet.git"
-description = "Official community skills"
-
-[[registry.suggests]]
-url = "https://github.com/acme/devops-skills.git"
-
-[registry.defaults]
-refresh_interval = "10m"
-"#,
-        )
-        .unwrap();
-
-        let config = load_config(tmp.path()).expect("Failed to parse config with all fields");
-        assert_eq!(config.registry.name, "acme-team-skills");
-        assert_eq!(
-            config.registry.description.as_deref(),
-            Some("Internal Python and DevOps skills")
-        );
-
-        let m = config.registry.maintainer.as_ref().unwrap();
-        assert_eq!(m.name.as_deref(), Some("Jane Doe"));
-        assert_eq!(m.github.as_deref(), Some("janedoe"));
-        assert_eq!(m.email.as_deref(), Some("jane@example.com"));
-
-        assert!(config.registry.urls.is_some());
-        assert!(config.registry.auth.unwrap().required);
-
-        let suggests = config.registry.suggests.as_ref().unwrap();
-        assert_eq!(suggests.len(), 2);
-        assert!(suggests[0].url.contains("skillet"));
-        assert_eq!(
-            suggests[0].description.as_deref(),
-            Some("Official community skills")
-        );
-        assert!(suggests[1].url.contains("devops-skills"));
-        assert!(suggests[1].description.is_none());
-
-        let defaults = config.registry.defaults.as_ref().unwrap();
-        assert_eq!(defaults.refresh_interval.as_deref(), Some("10m"));
-    }
-
-    #[test]
-    fn test_load_config_with_partial_extended_fields() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            r#"
-[registry]
-name = "minimal-plus"
-version = 1
-description = "Just a description, nothing else new"
-"#,
-        )
-        .unwrap();
-
-        let config = load_config(tmp.path()).expect("Failed to parse partial config");
-        assert_eq!(config.registry.name, "minimal-plus");
-        assert_eq!(
-            config.registry.description.as_deref(),
-            Some("Just a description, nothing else new")
-        );
-        assert!(config.registry.maintainer.is_none());
-        assert!(config.registry.suggests.is_none());
-        assert!(config.registry.defaults.is_none());
-    }
-
-    #[test]
-    fn test_load_config_minimal() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            "[registry]\nname = \"minimal\"\nversion = 1\n",
-        )
-        .unwrap();
-
-        let config = load_config(tmp.path()).expect("Failed to parse minimal config");
-        assert_eq!(config.registry.name, "minimal");
-        assert_eq!(config.registry.version, 1);
-        assert!(config.registry.description.is_none());
-        assert!(config.registry.maintainer.is_none());
-        assert!(config.registry.suggests.is_none());
-        assert!(config.registry.defaults.is_none());
     }
 
     #[test]
