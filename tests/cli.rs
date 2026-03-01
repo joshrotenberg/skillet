@@ -216,6 +216,63 @@ fn install_not_found() {
         .stderr(predicate::str::contains("not found"));
 }
 
+// ── Uninstall ────────────────────────────────────────────────────────
+
+#[test]
+fn uninstall_removes_installed_skill() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    // Install first
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success();
+
+    let skill_md = tmp.path().join(".agents/skills/rust-dev/SKILL.md");
+    assert!(skill_md.exists(), "SKILL.md should exist after install");
+
+    // Uninstall
+    skillet()
+        .args(["uninstall", "joshrotenberg/rust-dev"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Uninstalled joshrotenberg/rust-dev"));
+
+    // Files should be gone
+    assert!(!skill_md.exists(), "SKILL.md should be removed");
+
+    // List should be empty
+    skillet()
+        .args(["list"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("No skills installed"));
+}
+
+#[test]
+fn uninstall_not_installed() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["uninstall", "nobody/nothing"])
+        .env("HOME", &home)
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("not installed"));
+}
+
 // ── Authoring: validate ──────────────────────────────────────────────
 
 #[test]

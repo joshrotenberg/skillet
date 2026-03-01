@@ -48,6 +48,8 @@ enum Command {
     Init(InitArgs),
     /// Install a skill from a repo
     Install(InstallArgs),
+    /// Uninstall a skill
+    Uninstall(UninstallArgs),
     /// Search for skills
     Search(SearchArgs),
     /// List all skill categories with counts
@@ -195,6 +197,16 @@ struct InstallArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct UninstallArgs {
+    /// Skill to uninstall in owner/name format
+    skill: String,
+
+    /// Also remove the pinned content hash from trust state
+    #[arg(long)]
+    unpin: bool,
+}
+
+#[derive(clap::Args, Debug)]
 struct SearchArgs {
     /// Search query (or "*" for all skills)
     query: String,
@@ -308,6 +320,7 @@ async fn main() -> ExitCode {
         Some(Command::Validate(args)) => cli::author::run_validate(args),
         Some(Command::Init(args)) => cli::author::run_init(args),
         Some(Command::Install(args)) => cli::install::run_install(args),
+        Some(Command::Uninstall(args)) => cli::uninstall::run_uninstall(args),
         Some(Command::Search(args)) => cli::search::run_search(args),
         Some(Command::Categories(args)) => cli::search::run_categories(args),
         Some(Command::Info(args)) => cli::search::run_info(args),

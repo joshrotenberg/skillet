@@ -3,6 +3,7 @@ pub(crate) mod install;
 pub(crate) mod search;
 pub(crate) mod setup;
 pub(crate) mod trust;
+pub(crate) mod uninstall;
 
 use skillet_mcp::safety;
 
