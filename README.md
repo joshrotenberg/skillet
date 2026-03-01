@@ -10,7 +10,7 @@
 
 # skillet
 
-A skill registry toolkit for AI agents.
+A skill repo toolkit for AI agents.
 
 ## What is skillet
 
@@ -19,14 +19,14 @@ scattered across GitHub repos, npm packages, and copy-paste threads.
 There's no standard way to discover, distribute, or manage them.
 
 Skillet fixes this. Search, install, and manage skills from the CLI, or
-serve registries to agents over MCP so they can discover skills at
+serve repos to agents over MCP so they can discover skills at
 runtime. Skills follow the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills)
 and work with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, and
 any compatible agent.
 
-Think of it like git: skillet is the tool, registries are distributed.
-Anyone can create a registry (a git repo), publish skills to it, and
+Think of it like git: skillet is the tool, repos are distributed.
+Anyone can create a skill repo (a git repo with SKILL.md files) and
 share it. The same binary is always both client and server -- the CLI
 commands and the MCP server share the same index and search engine.
 
@@ -91,12 +91,12 @@ Or with Docker (zero install):
 ```
 
 That's it. Skillet auto-discovers the
-[official registry](https://github.com/joshrotenberg/skillet/tree/main/registry)
+[official repo](https://github.com/joshrotenberg/skillet/tree/main/registry)
 and any skills already installed on your machine. Your agent now has
 access to `search_skills`, `install_skill`, and the full
 [MCP interface](#mcp-interface).
 
-For custom or team registries, add `--remote` or `--registry` args:
+For custom or team repos, add `--remote` or `--repo` args:
 
 ```json
 {
@@ -104,7 +104,7 @@ For custom or team registries, add `--remote` or `--registry` args:
     "skillet": {
       "command": "skillet",
       "args": [
-        "--registry", "/path/to/local-skills",
+        "--repo", "/path/to/local-skills",
         "--remote", "https://github.com/acme/team-skills.git"
       ]
     }
@@ -154,11 +154,11 @@ which is the cross-agent convention. Other targets: `claude`, `cursor`,
 
 ### Embed skills in your project
 
-Add skills directly to any repo -- no registry required:
+Add skills directly to any repo -- no separate repo required:
 
 ```bash
 # Generate a skillet.toml with an inline skill
-skillet init-project --skill
+skillet init --skill
 
 # Write your skill prompt
 $EDITOR SKILL.md
@@ -166,26 +166,20 @@ $EDITOR SKILL.md
 # That's it. Run skillet from this directory and the skill is served.
 ```
 
-### Create and publish skills
+### Manage repos
 
 ```bash
-# Scaffold a new skill
-skillet init-skill myname/my-skill \
-  --description "What this skill does" \
-  --category development \
-  --tags "rust,testing"
+# Add a remote skill repo
+skillet repo add https://github.com/acme/team-skills.git
 
-# Edit the prompt
-$EDITOR myname/my-skill/SKILL.md
+# Add a local skill directory
+skillet repo add /path/to/local-skills
 
-# Validate (includes safety scanning)
-skillet validate myname/my-skill
+# See what's configured
+skillet repo list
 
-# Pack (validate + generate manifest + update version history)
-skillet pack myname/my-skill
-
-# Publish to a registry (pack + open PR via gh CLI)
-skillet publish myname/my-skill --repo owner/registry
+# Remove a repo
+skillet repo remove https://github.com/acme/team-skills.git
 ```
 
 ### What it looks like
@@ -217,16 +211,16 @@ Found 2 skills matching "rust"
 
 ## Features
 
-### Multi-registry support
+### Multi-repo support
 
 Aggregate local directories and remote git repos. Skillet clones and
 periodically refreshes remotes in the background. Use `--refresh-interval`
 to control how often (default: every 5 minutes).
 
 ```bash
-# CLI: explicit registries
+# CLI: explicit repos
 skillet search rust \
-  --registry /path/to/local \
+  --repo /path/to/local \
   --remote https://github.com/acme/team-skills.git
 
 # Or configure defaults in ~/.config/skillet/config.toml
@@ -235,8 +229,8 @@ skillet search rust \
 ### Project manifest (skillet.toml)
 
 Embed skills directly in any repository with a `skillet.toml` at the
-project root. No separate registry needed -- skillet auto-detects the
-manifest and serves embedded skills alongside registry skills.
+project root. No separate repo needed -- skillet auto-detects the
+manifest and serves embedded skills alongside repo skills.
 
 ```toml
 [project]
@@ -253,18 +247,16 @@ name = "my-tool-usage"
 description = "How to use my-tool"
 ```
 
-Three layout modes:
+Two layout modes:
 
 - **Single skill** (`[skill]`): one SKILL.md at the project root
 - **Multi-skill** (`[skills]`): a `.skillet/` directory with multiple skills
-- **Registry** (`[registry]`): replaces the legacy `config.toml` format
 
 All sections are optional and can be combined. Scaffold one with:
 
 ```bash
-skillet init-project --skill             # single skill
-skillet init-project --multi             # multi-skill directory
-skillet init-project --skill --registry  # skill + registry
+skillet init --skill             # single skill
+skillet init --multi             # multi-skill directory
 ```
 
 ### Zero-config skill discovery
@@ -277,18 +269,19 @@ discoverable. Metadata is inferred automatically:
 - **version** defaults to `0.1.0`
 - **description** from the first non-heading line of SKILL.md
 
-`skill.toml` is only required for publishing to a registry.
+`skill.toml` adds richer metadata (categories, tags, compatibility)
+but is never required.
 
 ### Local skill discovery
 
 Skillet auto-discovers skills already installed in agent directories
 (`~/.claude/skills/`, `~/.agents/skills/`, `~/.cursor/skills/`, etc.)
-and includes them alongside registry skills. No extra config required.
+and includes them alongside repo skills. No extra config required.
 
 ### Safety scanning
 
-Static analysis runs automatically during `validate`, `pack`, and
-`publish`. 13 regex-based rules detect dangerous patterns:
+Static analysis runs automatically during `validate`. 13 regex-based
+rules detect dangerous patterns:
 
 - **Danger** (blocks publish): shell injection, hardcoded credentials,
   private keys, token patterns
@@ -311,24 +304,19 @@ suppress = ["exfiltration-curl"]
 ### Trust and integrity
 
 Content hashing (SHA256) verifies skills haven't been tampered with.
-Three trust tiers:
+Two trust tiers:
 
-- **Trusted** -- skills from registries you've explicitly marked as
-  trusted
 - **Reviewed** -- skills whose content hash you've pinned after review
 - **Unknown** -- everything else (warns on install)
 
 ```bash
-# Trust a registry
-skillet trust add-registry https://github.com/acme/team-skills.git
-
-# Pin a specific skill's content hash
+# Pin a skill's content hash after reviewing it
 skillet trust pin joshrotenberg/rust-dev
 
 # Audit installed skills against pinned hashes
 skillet audit
 
-# See trust status
+# See pinned skills
 skillet trust list
 ```
 
@@ -349,7 +337,7 @@ minutes). No rebuilding the index from scratch every time. Use
 
 ### Filesystem watching
 
-Use `--watch` with the MCP server to auto-reload when local registry
+Use `--watch` with the MCP server to auto-reload when local repo
 files change. Useful during skill development.
 
 ### Configurable server exposure
@@ -415,46 +403,44 @@ fetch content via resource templates.
 | `skillet categories` | List all skill categories with counts |
 | `skillet info <owner/name>` | Show detailed information about a skill |
 | `skillet install <owner/name>` | Install a skill. Supports `--target`, `--global`, `--version` |
+| `skillet uninstall <owner/name>` | Uninstall a skill. Supports `--unpin` to also remove trust pin |
 | `skillet list` | List installed skills |
 
 ### Author skills
 
 | Command | Description |
 |---|---|
-| `skillet init-skill <path>` | Scaffold a new skillpack. Supports `--description`, `--category`, `--tags` |
-| `skillet init-project [path]` | Generate a `skillet.toml` project manifest. Supports `--skill`, `--multi`, `--registry` |
+| `skillet init [path]` | Generate a `skillet.toml` project manifest. Supports `--skill`, `--multi` |
 | `skillet validate <path>` | Validate a skillpack (includes safety scan). Supports `--skip-safety` |
-| `skillet pack <path>` | Validate + generate manifest + update version history |
-| `skillet publish <path> --repo <owner/repo>` | Pack + open a PR against the registry. Supports `--dry-run` |
 
-### Manage registries
+### Manage repos
 
 | Command | Description |
 |---|---|
-| `skillet init-registry <path>` | Scaffold a new registry git repo. Supports `--name`, `--description`, `--legacy` |
+| `skillet repo add <url_or_path>` | Add a remote or local repo to config |
+| `skillet repo remove <url_or_path>` | Remove a repo from config |
+| `skillet repo list` | List configured repos |
 | `skillet [serve]` | Run the MCP server (default when no subcommand) |
 
 ### Trust and audit
 
 | Command | Description |
 |---|---|
-| `skillet trust add-registry <url>` | Mark a registry as trusted |
-| `skillet trust remove-registry <url>` | Remove a trusted registry |
 | `skillet trust pin <owner/name>` | Pin a skill's content hash |
 | `skillet trust unpin <owner/name>` | Remove a content hash pin |
-| `skillet trust list` | Show trusted registries and pinned skills |
+| `skillet trust list` | Show pinned skills |
 | `skillet audit` | Verify installed skills against pinned hashes |
 
 ### Server options
 
 | Flag | Description |
 |---|---|
-| `--registry <path>` | Local registry directory (repeatable) |
+| `--repo <path>` | Local repo directory (repeatable) |
 | `--remote <url>` | Git URL to clone and serve from (repeatable) |
 | `--refresh-interval <duration>` | How often to pull from remotes (default: `5m`, `0` to disable) |
-| `--cache-dir <path>` | Directory to clone remote registries into |
-| `--subdir <path>` | Subdirectory within registries containing skills |
-| `--watch` | Watch local registries for changes and auto-reload |
+| `--cache-dir <path>` | Directory to clone remote repos into |
+| `--subdir <path>` | Subdirectory within repos containing skills |
+| `--watch` | Watch local repos for changes and auto-reload |
 | `--http <addr>` | Serve over HTTP instead of stdio (e.g. `0.0.0.0:8080`) |
 | `--read-only` | Don't expose the install_skill tool |
 | `--tools <list>` | Explicit tool allowlist (comma-separated) |
@@ -475,7 +461,7 @@ Skillet reads `~/.config/skillet/config.toml` for defaults. Run
 targets = ["agents"]    # default install target(s)
 global = false          # install globally vs project-local
 
-[registries]
+[repos]
 remote = ["https://github.com/joshrotenberg/skillet.git"]
 local = []
 
@@ -499,19 +485,18 @@ discover_local = true   # auto-discover installed skills
 
 ## Skill format
 
-A skill is a directory with a `SKILL.md` prompt. For publishing, add a
-`skill.toml` with metadata. For local use or embedded projects, only
-`SKILL.md` is required -- metadata is inferred automatically.
+A skill is a directory with a `SKILL.md` prompt. Add a `skill.toml`
+for richer metadata (categories, tags, compatibility). For local use
+or embedded projects, only `SKILL.md` is required -- metadata is
+inferred automatically.
 
 ```
 owner/skill-name/
   SKILL.md         # Agent-compatible prompt (required)
-  skill.toml       # Registry metadata (required for publishing)
+  skill.toml       # Metadata for indexing and search (optional)
   scripts/         # Optional executable scripts
   references/      # Optional reference docs
   assets/          # Optional templates, configs
-  versions.toml    # Version history (generated by pack)
-  MANIFEST.sha256  # Content hashes (generated by pack)
 ```
 
 The `skill.toml` carries metadata for indexing and search:
@@ -550,7 +535,7 @@ works standalone.
 
 v0.2.0. The skill format is stable, both the CLI and MCP interface are
 functional, and there's an
-[official registry](https://github.com/joshrotenberg/skillet/tree/main/registry)
+[official repo](https://github.com/joshrotenberg/skillet/tree/main/registry)
 with skills across development, devops, and security categories.
 `skillet.toml` provides a unified project manifest for embedding skills
 in any repository with zero-config discovery.
