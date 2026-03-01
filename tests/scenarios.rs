@@ -400,7 +400,7 @@ fn write_repo_config(repo: &std::path::Path, name: &str) {
 // Local discovery (#144) only runs in MCP server context, not CLI.
 // These tests exercise project manifest features testable via CLI.
 
-/// init-project -> add skills -> search finds them via --repo
+/// init -> add skills -> search finds them via --repo
 #[test]
 fn scenario_project_manifest_as_repo() {
     let tmp = tempfile::tempdir().expect("create temp dir");
@@ -436,15 +436,15 @@ fn scenario_project_manifest_as_repo() {
         .stdout(predicate::str::contains("my-tool"));
 }
 
-/// init-project scaffolding creates correct structure
+/// init scaffolding creates correct structure
 #[test]
-fn scenario_init_project_lifecycle() {
+fn scenario_init_lifecycle() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let project = tmp.path().join("new-project");
 
-    // Step 1: Init project with --skill
+    // Step 1: Init with --skill
     skillet()
-        .args(["init-project"])
+        .args(["init"])
         .arg(&project)
         .args(["--skill"])
         .assert()
@@ -481,15 +481,15 @@ fn scenario_init_project_lifecycle() {
         .stdout(predicate::str::contains("new-project"));
 }
 
-/// init-project with --multi creates multi-skill directory
+/// init with --multi creates multi-skill directory
 #[test]
-fn scenario_init_project_multi() {
+fn scenario_init_multi() {
     let tmp = tempfile::tempdir().expect("create temp dir");
     let project = tmp.path().join("multi-project");
 
     // Step 1: Init with --multi
     skillet()
-        .args(["init-project"])
+        .args(["init"])
         .arg(&project)
         .args(["--multi"])
         .assert()

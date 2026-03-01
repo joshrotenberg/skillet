@@ -44,7 +44,7 @@ description: {description}
 }
 
 /// Options for generating a `skillet.toml` project manifest.
-pub struct InitProjectOptions<'a> {
+pub struct InitOptions<'a> {
     /// Project name (defaults to directory name)
     pub name: &'a str,
     /// Project description
@@ -59,7 +59,7 @@ pub struct InitProjectOptions<'a> {
 ///
 /// Creates the file (does not create the directory). Returns an error if
 /// `skillet.toml` already exists.
-pub fn init_project(path: &Path, opts: &InitProjectOptions) -> crate::error::Result<()> {
+pub fn init(path: &Path, opts: &InitOptions) -> crate::error::Result<()> {
     let manifest_path = path.join("skillet.toml");
     if manifest_path.exists() {
         return Err(Error::Scaffold(format!(
@@ -93,7 +93,7 @@ pub fn init_project(path: &Path, opts: &InitProjectOptions) -> crate::error::Res
 }
 
 /// Render a `skillet.toml` template.
-fn render_skillet_toml(opts: &InitProjectOptions) -> String {
+fn render_skillet_toml(opts: &InitOptions) -> String {
     let mut content = String::new();
 
     // [project] section (always included)
@@ -151,18 +151,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_init_project_basic() {
+    fn test_init_basic() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "test-project",
             description: Some("A test project"),
             include_skill: false,
             include_multi: false,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("name = \"test-project\""));
@@ -180,18 +180,18 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_with_skill() {
+    fn test_init_with_skill() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "my-tool",
             description: Some("A CLI tool"),
             include_skill: true,
             include_multi: false,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("[skill]"));
@@ -206,18 +206,18 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_with_multi() {
+    fn test_init_with_multi() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "my-project",
             description: None,
             include_skill: false,
             include_multi: true,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("[skills]"));
@@ -228,21 +228,21 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_errors_on_existing() {
+    fn test_init_errors_on_existing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
         // Create skillet.toml first
         std::fs::write(path.join("skillet.toml"), "[project]\n").unwrap();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "test",
             description: None,
             include_skill: false,
             include_multi: false,
         };
 
-        let result = init_project(path, &opts);
+        let result = init(path, &opts);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already exists"));
     }

@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use skillet_mcp::{config, safety, scaffold, validate};
 
 use super::print_safety_report;
-use crate::{InitProjectArgs, ValidateArgs};
+use crate::{InitArgs, ValidateArgs};
 
 /// Run the `validate` subcommand.
 pub(crate) fn run_validate(args: ValidateArgs) -> ExitCode {
@@ -111,8 +111,8 @@ pub(crate) fn run_validate(args: ValidateArgs) -> ExitCode {
     ExitCode::SUCCESS
 }
 
-/// Run the `init-project` subcommand.
-pub(crate) fn run_init_project(args: InitProjectArgs) -> ExitCode {
+/// Run the `init` subcommand.
+pub(crate) fn run_init(args: InitArgs) -> ExitCode {
     let path = &args.path;
 
     // Ensure directory exists (for "." it already does)
@@ -136,14 +136,14 @@ pub(crate) fn run_init_project(args: InitProjectArgs) -> ExitCode {
         })
         .unwrap_or_else(|| "my-project".to_string());
 
-    let opts = scaffold::InitProjectOptions {
+    let opts = scaffold::InitOptions {
         name: &name,
         description: args.description.as_deref(),
         include_skill: args.skill,
         include_multi: args.multi,
     };
 
-    if let Err(e) = scaffold::init_project(path, &opts) {
+    if let Err(e) = scaffold::init(path, &opts) {
         eprintln!("Error: {e}");
         return ExitCode::from(1);
     }

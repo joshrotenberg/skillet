@@ -44,7 +44,8 @@ enum Command {
     /// Validate a skillpack directory
     Validate(ValidateArgs),
     /// Initialize a skillet.toml project manifest
-    InitProject(InitProjectArgs),
+    #[command(alias = "init-project")]
+    Init(InitArgs),
     /// Install a skill from a repo
     Install(InstallArgs),
     /// Search for skills
@@ -126,7 +127,7 @@ struct ValidateArgs {
 }
 
 #[derive(clap::Args, Debug)]
-struct InitProjectArgs {
+struct InitArgs {
     /// Directory for the project (defaults to current directory)
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -305,7 +306,7 @@ async fn main() -> ExitCode {
 
     let exit_code = match cli.command {
         Some(Command::Validate(args)) => cli::author::run_validate(args),
-        Some(Command::InitProject(args)) => cli::author::run_init_project(args),
+        Some(Command::Init(args)) => cli::author::run_init(args),
         Some(Command::Install(args)) => cli::install::run_install(args),
         Some(Command::Search(args)) => cli::search::run_search(args),
         Some(Command::Categories(args)) => cli::search::run_categories(args),
