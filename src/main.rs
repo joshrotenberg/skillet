@@ -43,14 +43,6 @@ enum Command {
     Serve(ServeArgs),
     /// Validate a skillpack directory
     Validate(ValidateArgs),
-    /// Pack a skillpack (validate + generate manifest + update versions)
-    Pack(PackArgs),
-    /// Publish a skillpack to a registry (pack + open PR)
-    Publish(PublishArgs),
-    /// Initialize a new skill registry
-    InitRegistry(InitRegistryArgs),
-    /// Scaffold a new skillpack directory
-    InitSkill(InitSkillArgs),
     /// Initialize a skillet.toml project manifest
     InitProject(InitProjectArgs),
     /// Install a skill from a registry
@@ -134,48 +126,6 @@ struct ValidateArgs {
 }
 
 #[derive(clap::Args, Debug)]
-struct PackArgs {
-    /// Path to the skillpack directory
-    path: PathBuf,
-
-    /// Skip safety scanning
-    #[arg(long)]
-    skip_safety: bool,
-}
-
-#[derive(clap::Args, Debug)]
-struct InitRegistryArgs {
-    /// Directory to create the registry in
-    path: PathBuf,
-
-    /// Registry name (defaults to directory name)
-    #[arg(long)]
-    name: Option<String>,
-
-    /// Registry description
-    #[arg(long)]
-    description: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-struct InitSkillArgs {
-    /// Path for the new skillpack (e.g. owner/skill-name)
-    path: PathBuf,
-
-    /// Skill description
-    #[arg(long)]
-    description: Option<String>,
-
-    /// Skill categories (can be specified multiple times)
-    #[arg(long)]
-    category: Vec<String>,
-
-    /// Skill tags (comma-separated)
-    #[arg(long, value_delimiter = ',')]
-    tags: Vec<String>,
-}
-
-#[derive(clap::Args, Debug)]
 struct InitProjectArgs {
     /// Directory for the project (defaults to current directory)
     #[arg(default_value = ".")]
@@ -200,29 +150,6 @@ struct InitProjectArgs {
     /// Include a \[registry\] section
     #[arg(long)]
     registry: bool,
-}
-
-#[derive(clap::Args, Debug)]
-struct PublishArgs {
-    /// Path to the skillpack directory
-    path: PathBuf,
-
-    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet")
-    #[arg(long)]
-    repo: String,
-
-    /// Override the destination path in the registry (e.g. "acme/lang/java/maven-build").
-    /// If not set, defaults to `owner/name/`.
-    #[arg(long)]
-    registry_path: Option<String>,
-
-    /// Validate and show what would happen without creating a PR
-    #[arg(long)]
-    dry_run: bool,
-
-    /// Skip safety scanning
-    #[arg(long)]
-    skip_safety: bool,
 }
 
 /// Shared registry source arguments for CLI subcommands.
@@ -408,10 +335,6 @@ async fn main() -> ExitCode {
 
     let exit_code = match cli.command {
         Some(Command::Validate(args)) => cli::author::run_validate(args),
-        Some(Command::Pack(args)) => cli::author::run_pack(args),
-        Some(Command::Publish(args)) => cli::author::run_publish(args),
-        Some(Command::InitRegistry(args)) => cli::author::run_init_registry(args),
-        Some(Command::InitSkill(args)) => cli::author::run_init_skill(args),
         Some(Command::InitProject(args)) => cli::author::run_init_project(args),
         Some(Command::Install(args)) => cli::install::run_install(args),
         Some(Command::Search(args)) => cli::search::run_search(args),

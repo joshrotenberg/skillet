@@ -962,26 +962,6 @@ description = "Just a description, nothing else new"
     }
 
     #[test]
-    fn test_init_registry_with_description() {
-        let dir = tempfile::tempdir().unwrap();
-        let registry_path = dir.path().join("described-registry");
-
-        crate::registry::init_registry(
-            &registry_path,
-            "described-registry",
-            Some("A test registry with a description"),
-        )
-        .unwrap();
-
-        let config = load_config(&registry_path).expect("Failed to load init'd config");
-        assert_eq!(config.registry.name, "described-registry");
-        assert_eq!(
-            config.registry.description.as_deref(),
-            Some("A test registry with a description")
-        );
-    }
-
-    #[test]
     fn test_latest_all_yanked_returns_none() {
         let entry = SkillEntry {
             owner: "test".to_string(),
