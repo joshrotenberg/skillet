@@ -1,6 +1,6 @@
 //! BM25 search indexing for skill discovery.
 //!
-//! Vendored from jpx-engine with modifications for the skillet registry:
+//! Vendored from jpx-engine with modifications for skillet:
 //! removed serde derives (index is ephemeral), removed source document storage
 //! (skill data lives in SkillIndex), removed portability fields.
 //!

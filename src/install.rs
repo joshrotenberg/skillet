@@ -16,9 +16,9 @@ use crate::state::SkillVersion;
 pub struct InstallOptions {
     pub targets: Vec<InstallTarget>,
     pub global: bool,
-    /// Registry identifier for the manifest entry.
-    /// Git URL for remotes, `local:<abs_path>` for local registries.
-    pub registry: String,
+    /// Repo identifier for the manifest entry.
+    /// Git URL for remotes, `local:<abs_path>` for local repos.
+    pub repo: String,
 }
 
 /// Result of installing a skill to a single target.
@@ -64,7 +64,7 @@ pub fn install_skill(
             owner: owner.to_string(),
             name: name.to_string(),
             version: version.version.clone(),
-            registry: options.registry.clone(),
+            repo: options.repo.clone(),
             checksum: checksum.clone(),
             installed_to: abs_dir.clone(),
             installed_at: now.clone(),
@@ -127,6 +127,51 @@ fn write_skill_to_dir(version: &SkillVersion, dir: &Path) -> crate::error::Resul
 
     written.sort();
     Ok(written)
+}
+
+/// Result of uninstalling a skill.
+#[derive(Debug)]
+pub struct UninstallResult {
+    /// Paths that were removed.
+    pub removed_paths: Vec<PathBuf>,
+}
+
+/// Uninstall a skill by removing its files and manifest entries.
+///
+/// Finds all installations of `owner/name` in the manifest, removes the
+/// installed directories, and removes the manifest entries. Does NOT call
+/// `manifest::save()` -- the caller should save once after completion.
+pub fn uninstall_skill(
+    owner: &str,
+    name: &str,
+    manifest: &mut crate::manifest::InstalledManifest,
+) -> crate::error::Result<UninstallResult> {
+    let entries: Vec<PathBuf> = manifest
+        .find_by_skill(owner, name)
+        .iter()
+        .map(|e| e.installed_to.clone())
+        .collect();
+
+    if entries.is_empty() {
+        return Err(Error::Other(format!(
+            "skill '{owner}/{name}' is not installed"
+        )));
+    }
+
+    let mut removed_paths = Vec::new();
+
+    for path in &entries {
+        if path.is_dir() {
+            std::fs::remove_dir_all(path).map_err(|e| Error::Io {
+                context: format!("failed to remove {}", path.display()),
+                source: e,
+            })?;
+        }
+        manifest.remove(owner, name, path);
+        removed_paths.push(path.clone());
+    }
+
+    Ok(UninstallResult { removed_paths })
 }
 
 #[cfg(test)]
@@ -206,7 +251,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: skill_dir,
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -252,7 +297,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: dir1.clone(),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -261,7 +306,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "local:/tmp".to_string(),
+            repo: "local:/tmp".to_string(),
             checksum: integrity::sha256_hex(&version.skill_md),
             installed_to: dir2.clone(),
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -306,7 +351,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: "1.0.0".to_string(),
-            registry: "https://github.com/owner/repo.git".to_string(),
+            repo: "https://github.com/owner/repo.git".to_string(),
             checksum: checksum.clone(),
             installed_to: skill_dir,
             installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -382,7 +427,7 @@ mod tests {
         let options = InstallOptions {
             targets: vec![InstallTarget::Agents],
             global: false,
-            registry: "local:/test".to_string(),
+            repo: "local:/test".to_string(),
         };
 
         // install_skill resolves relative paths via cwd. We'll use
@@ -396,7 +441,7 @@ mod tests {
             owner: "testowner".to_string(),
             name: "test-skill".to_string(),
             version: version.version.clone(),
-            registry: options.registry.clone(),
+            repo: options.repo.clone(),
             checksum,
             installed_to: target_dir.clone(),
             installed_at: config::now_iso8601(),
@@ -406,7 +451,7 @@ mod tests {
         assert!(files.contains(&"scripts/lint.sh".to_string()));
         assert!(files.contains(&"references/guide.md".to_string()));
         assert_eq!(manifest.skills.len(), 1);
-        assert_eq!(manifest.skills[0].registry, "local:/test");
+        assert_eq!(manifest.skills[0].repo, "local:/test");
     }
 
     #[test]
@@ -438,5 +483,69 @@ mod tests {
             "scripts/z-last.sh".to_string(),
         ];
         assert_eq!(files, expected);
+    }
+
+    #[test]
+    fn test_uninstall_removes_files_and_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let version = sample_version();
+        let mut manifest = InstalledManifest::default();
+
+        let skill_dir = tmp.path().join("agents/skills/test-skill");
+        write_skill_to_dir(&version, &skill_dir).unwrap();
+        assert!(skill_dir.join("SKILL.md").is_file());
+
+        manifest.upsert(InstalledSkill {
+            owner: "testowner".to_string(),
+            name: "test-skill".to_string(),
+            version: "1.0.0".to_string(),
+            repo: "local:/tmp".to_string(),
+            checksum: integrity::sha256_hex(&version.skill_md),
+            installed_to: skill_dir.clone(),
+            installed_at: "2026-01-01T00:00:00Z".to_string(),
+        });
+
+        let result = uninstall_skill("testowner", "test-skill", &mut manifest).unwrap();
+        assert_eq!(result.removed_paths, vec![skill_dir.clone()]);
+        assert!(manifest.skills.is_empty());
+        assert!(!skill_dir.exists());
+    }
+
+    #[test]
+    fn test_uninstall_not_installed() {
+        let mut manifest = InstalledManifest::default();
+        let result = uninstall_skill("nobody", "nothing", &mut manifest);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not installed"));
+    }
+
+    #[test]
+    fn test_uninstall_multiple_targets() {
+        let tmp = tempfile::tempdir().unwrap();
+        let version = sample_version();
+        let mut manifest = InstalledManifest::default();
+
+        let dir1 = tmp.path().join("agents/skills/test-skill");
+        let dir2 = tmp.path().join("claude/skills/test-skill");
+        write_skill_to_dir(&version, &dir1).unwrap();
+        write_skill_to_dir(&version, &dir2).unwrap();
+
+        for dir in [&dir1, &dir2] {
+            manifest.upsert(InstalledSkill {
+                owner: "testowner".to_string(),
+                name: "test-skill".to_string(),
+                version: "1.0.0".to_string(),
+                repo: "local:/tmp".to_string(),
+                checksum: integrity::sha256_hex(&version.skill_md),
+                installed_to: dir.clone(),
+                installed_at: "2026-01-01T00:00:00Z".to_string(),
+            });
+        }
+
+        let result = uninstall_skill("testowner", "test-skill", &mut manifest).unwrap();
+        assert_eq!(result.removed_paths.len(), 2);
+        assert!(manifest.skills.is_empty());
+        assert!(!dir1.exists());
+        assert!(!dir2.exists());
     }
 }

@@ -1,73 +1,20 @@
 use std::process::ExitCode;
 
-use skillet_mcp::{config, integrity, manifest, registry, trust};
+use skillet_mcp::{config, integrity, manifest, repo, trust};
 
 use super::parse_skill_ref;
-use crate::{
-    AuditArgs, TrustAction, TrustAddRegistryArgs, TrustArgs, TrustListArgs, TrustPinArgs,
-    TrustRemoveRegistryArgs, TrustUnpinArgs,
-};
+use crate::{AuditArgs, TrustAction, TrustArgs, TrustPinArgs, TrustUnpinArgs};
 
 /// Run the `trust` subcommand.
 pub(crate) fn run_trust(args: TrustArgs) -> ExitCode {
     match args.action {
-        TrustAction::AddRegistry(a) => run_trust_add_registry(a),
-        TrustAction::RemoveRegistry(a) => run_trust_remove_registry(a),
-        TrustAction::List(a) => run_trust_list(a),
+        TrustAction::List => run_trust_list(),
         TrustAction::Pin(a) => run_trust_pin(a),
         TrustAction::Unpin(a) => run_trust_unpin(a),
     }
 }
 
-pub(crate) fn run_trust_add_registry(args: TrustAddRegistryArgs) -> ExitCode {
-    let mut state = match trust::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error loading trust state: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    if state.is_trusted(&args.url) {
-        println!("Registry already trusted: {}", args.url);
-        return ExitCode::SUCCESS;
-    }
-
-    state.add_registry(&args.url, args.note.as_deref());
-
-    if let Err(e) = trust::save(&state) {
-        eprintln!("Error saving trust state: {e}");
-        return ExitCode::from(1);
-    }
-
-    println!("Trusted: {}", args.url);
-    ExitCode::SUCCESS
-}
-
-pub(crate) fn run_trust_remove_registry(args: TrustRemoveRegistryArgs) -> ExitCode {
-    let mut state = match trust::load() {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Error loading trust state: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    if !state.remove_registry(&args.url) {
-        eprintln!("Registry not found in trusted list: {}", args.url);
-        return ExitCode::from(1);
-    }
-
-    if let Err(e) = trust::save(&state) {
-        eprintln!("Error saving trust state: {e}");
-        return ExitCode::from(1);
-    }
-
-    println!("Removed: {}", args.url);
-    ExitCode::SUCCESS
-}
-
-pub(crate) fn run_trust_list(args: TrustListArgs) -> ExitCode {
+pub(crate) fn run_trust_list() -> ExitCode {
     let state = match trust::load() {
         Ok(s) => s,
         Err(e) => {
@@ -76,38 +23,22 @@ pub(crate) fn run_trust_list(args: TrustListArgs) -> ExitCode {
         }
     };
 
-    if state.trusted_registries.is_empty() && state.pinned_skills.is_empty() {
-        println!("No trusted registries or pinned skills.");
+    if state.pinned_skills.is_empty() {
+        println!("No pinned skills.");
         return ExitCode::SUCCESS;
     }
 
-    if !state.trusted_registries.is_empty() {
-        println!("Trusted registries ({}):\n", state.trusted_registries.len());
-        for r in &state.trusted_registries {
-            print!("  {}", r.registry);
-            if let Some(ref note) = r.note {
-                print!("  ({note})");
-            }
-            println!("  [{}]", r.trusted_at);
-        }
-    }
-
-    if !args.registries_only && !state.pinned_skills.is_empty() {
-        if !state.trusted_registries.is_empty() {
-            println!();
-        }
-        println!("Pinned skills ({}):\n", state.pinned_skills.len());
-        for p in &state.pinned_skills {
-            let hash_display = if p.content_hash.len() > 17 {
-                format!("{}...", &p.content_hash[..17])
-            } else {
-                p.content_hash.clone()
-            };
-            println!(
-                "  {}/{} v{}  {}  [{}]",
-                p.owner, p.name, p.version, hash_display, p.pinned_at
-            );
-        }
+    println!("Pinned skills ({}):\n", state.pinned_skills.len());
+    for p in &state.pinned_skills {
+        let hash_display = if p.content_hash.len() > 17 {
+            format!("{}...", &p.content_hash[..17])
+        } else {
+            p.content_hash.clone()
+        };
+        println!(
+            "  {}/{} v{}  {}  [{}]",
+            p.owner, p.name, p.version, hash_display, p.pinned_at
+        );
     }
 
     ExitCode::SUCCESS
@@ -130,19 +61,19 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    if args.registries.no_cache {
+    if args.repos.no_cache {
         cli_config.cache.enabled = false;
     }
 
-    let (skill_index, registry_paths) = match registry::load_registries(
-        &args.registries.registry,
-        &args.registries.remote,
+    let (skill_index, repo_paths) = match repo::load_repos(
+        &args.repos.repo,
+        &args.repos.remote,
         &cli_config,
-        args.registries.subdir.as_deref(),
+        args.repos.subdir.as_deref(),
     ) {
         Ok(r) => r,
         Err(e) => {
-            eprintln!("Error loading registries: {e}");
+            eprintln!("Error loading repos: {e}");
             return ExitCode::from(1);
         }
     };
@@ -153,7 +84,7 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
     {
         Some(e) => e,
         None => {
-            eprintln!("Error: skill '{owner}/{name}' not found in any registry");
+            eprintln!("Error: skill '{owner}/{name}' not found in any repo");
             return ExitCode::from(1);
         }
     };
@@ -166,8 +97,8 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    let registry_id = if !registry_paths.is_empty() {
-        registry::registry_id(&registry_paths[0], &args.registries.remote)
+    let repo_id = if !repo_paths.is_empty() {
+        repo::repo_id(&repo_paths[0], &args.repos.remote)
     } else {
         "unknown".to_string()
     };
@@ -182,7 +113,7 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         }
     };
 
-    trust_state.pin_skill(owner, name, &version.version, &registry_id, &content_hash);
+    trust_state.pin_skill(owner, name, &version.version, &repo_id, &content_hash);
 
     if let Err(e) = trust::save(&trust_state) {
         eprintln!("Error saving trust state: {e}");

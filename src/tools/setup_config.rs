@@ -10,7 +10,7 @@ use tower_mcp::{
 };
 
 use skillet_mcp::config;
-use skillet_mcp::registry;
+use skillet_mcp::repo;
 use skillet_mcp::state::AppState;
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -18,7 +18,7 @@ pub struct SetupConfigInput {
     /// Default install target (default: "agents"). Options: agents, claude, cursor, copilot, windsurf, gemini, all
     #[serde(default)]
     target: Option<String>,
-    /// Additional remote registry URLs to add beyond the official registry
+    /// Additional remote repo URLs to add beyond the official repo
     #[serde(default)]
     remotes: Vec<String>,
     /// Overwrite existing config if present (default: false)
@@ -30,7 +30,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
     ToolBuilder::new("setup_config")
         .description(
             "Generate initial skillet configuration at ~/.config/skillet/config.toml. \
-             Sets up the official registry, default install target, and standard \
+             Sets up the official repo, default install target, and standard \
              defaults. Use this to help users get started with skillet.",
         )
         .extractor_handler(
@@ -49,7 +49,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 let target = input.target.as_deref().unwrap_or("agents");
 
                 // Build remotes: official + user-provided
-                let mut remotes = vec![registry::DEFAULT_REGISTRY_URL.to_string()];
+                let mut remotes = vec![repo::DEFAULT_REPO_URL.to_string()];
                 remotes.extend(input.remotes);
 
                 let generated = match config::generate_default_config(remotes, vec![], target) {

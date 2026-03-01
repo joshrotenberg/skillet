@@ -15,123 +15,53 @@ pub struct AppState {
     pub index: RwLock<SkillIndex>,
     /// BM25 search index over skills, rebuilt on refresh
     pub search: RwLock<SkillSearch>,
-    /// Paths to all registry roots (git checkouts)
-    pub registry_paths: Vec<PathBuf>,
+    /// Paths to all repo roots (git checkouts)
+    pub repo_paths: Vec<PathBuf>,
     /// Remote URLs (for cache key generation)
     pub remote_urls: Vec<String>,
-    /// Registry configuration (from skillet.toml or defaults)
-    pub config: RegistryConfig,
+    /// Server configuration (name and refresh interval)
+    pub config: ServerConfig,
 }
 
 impl AppState {
     pub fn new(
-        registry_paths: Vec<PathBuf>,
+        repo_paths: Vec<PathBuf>,
         remote_urls: Vec<String>,
         index: SkillIndex,
         search: SkillSearch,
-        config: RegistryConfig,
+        config: ServerConfig,
     ) -> Arc<Self> {
         Arc::new(Self {
             index: RwLock::new(index),
             search: RwLock::new(search),
-            registry_paths,
+            repo_paths,
             remote_urls,
             config,
         })
     }
 }
 
-/// Top-level registry configuration, parsed from `skillet.toml`.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryConfig {
-    pub registry: RegistryInfo,
+/// Server configuration derived from the first repo's skillet.toml.
+///
+/// Used for MCP server name and refresh interval defaults.
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    /// Server name (defaults to "skillet")
+    pub name: String,
+    /// Default refresh interval (e.g. "5m", "1h")
+    pub refresh_interval: Option<String>,
 }
 
-impl Default for RegistryConfig {
+impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            registry: RegistryInfo {
-                name: default_registry_name(),
-                version: default_registry_version(),
-                description: None,
-                maintainer: None,
-                urls: None,
-                auth: None,
-                suggests: None,
-                defaults: None,
-            },
+            name: "skillet".to_string(),
+            refresh_interval: None,
         }
     }
 }
 
-/// Core registry metadata.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryInfo {
-    #[serde(default = "default_registry_name")]
-    pub name: String,
-    #[serde(default = "default_registry_version")]
-    pub version: u32,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub maintainer: Option<RegistryMaintainer>,
-    #[serde(default)]
-    pub urls: Option<RegistryUrls>,
-    #[serde(default)]
-    pub auth: Option<RegistryAuth>,
-    #[serde(default)]
-    pub suggests: Option<Vec<RegistrySuggestion>>,
-    #[serde(default)]
-    pub defaults: Option<RegistryDefaults>,
-}
-
-/// Registry maintainer information.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryMaintainer {
-    pub name: Option<String>,
-    pub github: Option<String>,
-    pub email: Option<String>,
-}
-
-/// A suggested registry for discovery (lightweight federation).
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistrySuggestion {
-    pub url: String,
-    pub description: Option<String>,
-}
-
-/// Server defaults that a registry can specify.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistryDefaults {
-    pub refresh_interval: Option<String>,
-}
-
-/// Optional URL endpoints for non-git-backed registries.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryUrls {
-    pub download: Option<String>,
-    pub api: Option<String>,
-}
-
-/// Optional auth configuration.
-#[derive(Debug, Clone, Deserialize)]
-#[allow(dead_code)]
-pub struct RegistryAuth {
-    #[serde(default)]
-    pub required: bool,
-}
-
-fn default_registry_name() -> String {
-    "skillet".to_string()
-}
-
-fn default_registry_version() -> u32 {
-    1
-}
-
-/// In-memory index of all skills across all registries
+/// In-memory index of all skills across all repos
 #[derive(Debug, Default)]
 pub struct SkillIndex {
     /// All skills keyed by (owner, name)
@@ -142,14 +72,14 @@ pub struct SkillIndex {
 
 impl SkillIndex {
     /// Merge another index into this one. Skills already present are skipped
-    /// (first registry wins).
+    /// (first repo wins).
     pub fn merge(&mut self, other: SkillIndex) {
         for (key, entry) in other.skills {
             if self.skills.contains_key(&key) {
                 tracing::debug!(
                     owner = %key.0,
                     name = %key.1,
-                    "Skipping duplicate skill from secondary registry"
+                    "Skipping duplicate skill from secondary repo"
                 );
                 continue;
             }
@@ -169,9 +99,10 @@ impl SkillIndex {
 /// Where a skill was discovered from.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SkillSource {
-    /// From a git-backed registry with skill.toml
+    /// From a git-backed repo with skill.toml
     #[default]
-    Registry,
+    #[serde(alias = "Registry")]
+    Repo,
     /// Auto-discovered from a local agent skills directory
     Local {
         /// Agent platform (e.g. "claude", "agents")
@@ -189,10 +120,10 @@ pub enum SkillSource {
 }
 
 impl SkillSource {
-    /// Returns a human-readable label for the source, or `None` for registry skills.
+    /// Returns a human-readable label for the source, or `None` for repo skills.
     pub fn label(&self) -> Option<String> {
         match self {
-            Self::Registry => None,
+            Self::Repo => None,
             Self::Local { platform, .. } => Some(format!("local ({platform})")),
             Self::Embedded { project, .. } => Some(format!("embedded ({project})")),
         }
@@ -201,7 +132,7 @@ impl SkillSource {
     /// Returns the on-disk path for local or embedded skills.
     pub fn path(&self) -> Option<&Path> {
         match self {
-            Self::Registry => None,
+            Self::Repo => None,
             Self::Local { path, .. } | Self::Embedded { path, .. } => Some(path),
         }
     }
@@ -212,10 +143,14 @@ impl SkillSource {
 pub struct SkillEntry {
     pub owner: String,
     pub name: String,
-    /// Relative path from registry root (e.g., "acme/lang/java/maven-build").
+    /// Relative path from repo root (e.g., "acme/lang/java/maven-build").
     /// None for flat skills at the standard `owner/name/` depth.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub registry_path: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "registry_path"
+    )]
+    pub repo_path: Option<String>,
     pub versions: Vec<SkillVersion>,
     #[serde(default)]
     pub source: SkillSource,
@@ -454,9 +389,9 @@ mod tests {
         SkillEntry {
             owner: owner.to_string(),
             name: name.to_string(),
-            registry_path: None,
+            repo_path: None,
             versions,
-            source: SkillSource::Registry,
+            source: SkillSource::Repo,
         }
     }
 
@@ -513,7 +448,7 @@ mod tests {
     // -- SkillIndex::merge() --
 
     #[test]
-    fn merge_first_registry_wins() {
+    fn merge_first_repo_wins() {
         let mut primary = SkillIndex::default();
         primary.skills.insert(
             ("acme".into(), "tool".into()),
@@ -629,8 +564,8 @@ mod tests {
     // -- SkillSource --
 
     #[test]
-    fn source_registry_label_is_none() {
-        assert!(SkillSource::Registry.label().is_none());
+    fn source_repo_label_is_none() {
+        assert!(SkillSource::Repo.label().is_none());
     }
 
     #[test]
@@ -652,8 +587,8 @@ mod tests {
     }
 
     #[test]
-    fn source_registry_path_is_none() {
-        assert!(SkillSource::Registry.path().is_none());
+    fn source_repo_path_is_none() {
+        assert!(SkillSource::Repo.path().is_none());
     }
 
     #[test]
@@ -791,14 +726,12 @@ mod tests {
         assert_eq!(summary.source_label, Some("local (claude)".into()));
     }
 
-    // -- RegistryConfig default --
+    // -- ServerConfig default --
 
     #[test]
-    fn registry_config_default() {
-        let config = RegistryConfig::default();
-        assert_eq!(config.registry.name, "skillet");
-        assert_eq!(config.registry.version, 1);
-        assert!(config.registry.description.is_none());
-        assert!(config.registry.maintainer.is_none());
+    fn server_config_default() {
+        let config = ServerConfig::default();
+        assert_eq!(config.name, "skillet");
+        assert!(config.refresh_interval.is_none());
     }
 }

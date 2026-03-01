@@ -1,83 +1,8 @@
-//! Skill scaffolding: generate a new skillpack directory with template files.
+//! Skill scaffolding: generate project manifests with template files.
 
 use std::path::Path;
 
 use crate::error::Error;
-
-/// Initialize a new skillpack at the given path.
-///
-/// Creates the directory with template `skill.toml` and `SKILL.md` files.
-/// The `owner` and `name` are inferred by the caller from the path components.
-pub fn init_skill(
-    path: &Path,
-    owner: &str,
-    name: &str,
-    description: &str,
-    categories: &[String],
-    tags: &[String],
-) -> crate::error::Result<()> {
-    if path.exists() {
-        return Err(Error::Scaffold(format!(
-            "{} already exists",
-            path.display()
-        )));
-    }
-
-    std::fs::create_dir_all(path)?;
-
-    let skill_toml = render_skill_toml(owner, name, description, categories, tags);
-    std::fs::write(path.join("skill.toml"), &skill_toml)?;
-
-    let skill_md = render_skill_md(name, description);
-    std::fs::write(path.join("SKILL.md"), &skill_md)?;
-
-    Ok(())
-}
-
-/// Render a template `skill.toml` with the given values.
-fn render_skill_toml(
-    owner: &str,
-    name: &str,
-    description: &str,
-    categories: &[String],
-    tags: &[String],
-) -> String {
-    let categories_str = categories
-        .iter()
-        .map(|c| format!("\"{c}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    let tags_str = tags
-        .iter()
-        .map(|t| format!("\"{t}\""))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!(
-        r#"[skill]
-name = "{name}"
-owner = "{owner}"
-version = "0.1.0"
-description = "{description}"
-trigger = "Use when ..."
-license = "MIT"
-
-[skill.author]
-name = "{owner}"
-github = "{owner}"
-
-[skill.classification]
-categories = [{categories_str}]
-tags = [{tags_str}]
-
-[skill.compatibility]
-requires_tool_use = true
-required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
-verified_with = []
-"#
-    )
-}
 
 /// Render a template `SKILL.md` with frontmatter and section scaffolding.
 fn render_skill_md(name: &str, description: &str) -> String {
@@ -119,7 +44,7 @@ description: {description}
 }
 
 /// Options for generating a `skillet.toml` project manifest.
-pub struct InitProjectOptions<'a> {
+pub struct InitOptions<'a> {
     /// Project name (defaults to directory name)
     pub name: &'a str,
     /// Project description
@@ -128,15 +53,13 @@ pub struct InitProjectOptions<'a> {
     pub include_skill: bool,
     /// Include a `[skills]` section
     pub include_multi: bool,
-    /// Include a `[registry]` section
-    pub include_registry: bool,
 }
 
 /// Generate a `skillet.toml` project manifest at the given path.
 ///
 /// Creates the file (does not create the directory). Returns an error if
 /// `skillet.toml` already exists.
-pub fn init_project(path: &Path, opts: &InitProjectOptions) -> crate::error::Result<()> {
+pub fn init(path: &Path, opts: &InitOptions) -> crate::error::Result<()> {
     let manifest_path = path.join("skillet.toml");
     if manifest_path.exists() {
         return Err(Error::Scaffold(format!(
@@ -170,7 +93,7 @@ pub fn init_project(path: &Path, opts: &InitProjectOptions) -> crate::error::Res
 }
 
 /// Render a `skillet.toml` template.
-fn render_skillet_toml(opts: &InitProjectOptions) -> String {
+fn render_skillet_toml(opts: &InitOptions) -> String {
     let mut content = String::new();
 
     // [project] section (always included)
@@ -220,17 +143,6 @@ fn render_skillet_toml(opts: &InitProjectOptions) -> String {
         content.push_str("\n[skills]\npath = \".skillet\"\n");
     }
 
-    // [registry] section
-    if opts.include_registry {
-        content.push_str(&format!(
-            "\n[registry]\nname = \"{name}\"\nversion = 1\n",
-            name = opts.name
-        ));
-        if let Some(desc) = opts.description {
-            content.push_str(&format!("description = \"{desc}\"\n"));
-        }
-    }
-
     content
 }
 
@@ -239,117 +151,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_init_skill_creates_files() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill_path = tmp.path().join("myowner/my-skill");
-
-        init_skill(&skill_path, "myowner", "my-skill", "A test skill", &[], &[]).unwrap();
-
-        assert!(skill_path.join("skill.toml").is_file());
-        assert!(skill_path.join("SKILL.md").is_file());
-
-        // Verify skill.toml content
-        let toml_content = std::fs::read_to_string(skill_path.join("skill.toml")).unwrap();
-        assert!(toml_content.contains("name = \"my-skill\""));
-        assert!(toml_content.contains("owner = \"myowner\""));
-        assert!(toml_content.contains("version = \"0.1.0\""));
-        assert!(toml_content.contains("description = \"A test skill\""));
-
-        // Verify SKILL.md content
-        let md_content = std::fs::read_to_string(skill_path.join("SKILL.md")).unwrap();
-        assert!(md_content.contains("name: my-skill"));
-        assert!(md_content.contains("# My Skill"));
-        assert!(md_content.contains("A test skill"));
-    }
-
-    #[test]
-    fn test_init_skill_passes_validation() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill_path = tmp.path().join("testowner/test-skill");
-
-        init_skill(
-            &skill_path,
-            "testowner",
-            "test-skill",
-            "A test skill",
-            &[],
-            &[],
-        )
-        .unwrap();
-
-        let result = crate::validate::validate_skillpack(&skill_path)
-            .expect("scaffolded skill should pass validation");
-        assert_eq!(result.owner, "testowner");
-        assert_eq!(result.name, "test-skill");
-        assert_eq!(result.version, "0.1.0");
-    }
-
-    #[test]
-    fn test_init_skill_with_categories_and_tags() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill_path = tmp.path().join("acme/docker-ops");
-
-        init_skill(
-            &skill_path,
-            "acme",
-            "docker-ops",
-            "Docker operations",
-            &["devops".to_string(), "containers".to_string()],
-            &["docker".to_string(), "compose".to_string()],
-        )
-        .unwrap();
-
-        let toml_content = std::fs::read_to_string(skill_path.join("skill.toml")).unwrap();
-        assert!(toml_content.contains("\"devops\""));
-        assert!(toml_content.contains("\"containers\""));
-        assert!(toml_content.contains("\"docker\""));
-        assert!(toml_content.contains("\"compose\""));
-
-        // Should still validate
-        let result = crate::validate::validate_skillpack(&skill_path)
-            .expect("should pass validation with categories/tags");
-        assert_eq!(
-            result
-                .metadata
-                .skill
-                .classification
-                .as_ref()
-                .unwrap()
-                .categories,
-            vec!["devops", "containers"]
-        );
-        assert_eq!(
-            result.metadata.skill.classification.as_ref().unwrap().tags,
-            vec!["docker", "compose"]
-        );
-    }
-
-    #[test]
-    fn test_init_skill_errors_on_existing_directory() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skill_path = tmp.path().join("owner/existing");
-
-        std::fs::create_dir_all(&skill_path).unwrap();
-
-        let result = init_skill(&skill_path, "owner", "existing", "test", &[], &[]);
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("already exists"));
-    }
-
-    #[test]
-    fn test_init_project_basic() {
+    fn test_init_basic() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "test-project",
             description: Some("A test project"),
             include_skill: false,
             include_multi: false,
-            include_registry: false,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("name = \"test-project\""));
@@ -367,19 +180,18 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_with_skill() {
+    fn test_init_with_skill() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "my-tool",
             description: Some("A CLI tool"),
             include_skill: true,
             include_multi: false,
-            include_registry: false,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("[skill]"));
@@ -394,19 +206,18 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_with_multi() {
+    fn test_init_with_multi() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "my-project",
             description: None,
             include_skill: false,
             include_multi: true,
-            include_registry: false,
         };
 
-        init_project(path, &opts).unwrap();
+        init(path, &opts).unwrap();
 
         let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
         assert!(content.contains("[skills]"));
@@ -417,47 +228,21 @@ mod tests {
     }
 
     #[test]
-    fn test_init_project_with_registry() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path();
-
-        let opts = InitProjectOptions {
-            name: "my-registry",
-            description: Some("Skills registry"),
-            include_skill: false,
-            include_multi: false,
-            include_registry: true,
-        };
-
-        init_project(path, &opts).unwrap();
-
-        let content = std::fs::read_to_string(path.join("skillet.toml")).unwrap();
-        assert!(content.contains("[registry]"));
-        assert!(content.contains("version = 1"));
-
-        // Should be loadable as a registry config
-        let manifest = crate::project::load_skillet_toml(path).unwrap().unwrap();
-        let config = manifest.into_registry_config().unwrap();
-        assert_eq!(config.registry.name, "my-registry");
-    }
-
-    #[test]
-    fn test_init_project_errors_on_existing() {
+    fn test_init_errors_on_existing() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path();
 
         // Create skillet.toml first
         std::fs::write(path.join("skillet.toml"), "[project]\n").unwrap();
 
-        let opts = InitProjectOptions {
+        let opts = InitOptions {
             name: "test",
             description: None,
             include_skill: false,
             include_multi: false,
-            include_registry: false,
         };
 
-        let result = init_project(path, &opts);
+        let result = init(path, &opts);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("already exists"));
     }

@@ -17,11 +17,11 @@ use clap::{Parser, Subcommand};
 use tower_mcp::transport::http::HttpTransport;
 use tower_mcp::{McpRouter, StdioTransport};
 
-use skillet_mcp::cache::{self, RegistrySource};
+use skillet_mcp::cache::{self, RepoSource};
 use skillet_mcp::config;
-use skillet_mcp::registry::{cache_dir_for_url, default_cache_dir, parse_duration};
+use skillet_mcp::repo::{cache_dir_for_url, default_cache_dir, parse_duration};
 use skillet_mcp::state::AppState;
-use skillet_mcp::{discover, git, index, registry, search, state};
+use skillet_mcp::{discover, git, index, repo, search, state};
 
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
@@ -43,19 +43,14 @@ enum Command {
     Serve(ServeArgs),
     /// Validate a skillpack directory
     Validate(ValidateArgs),
-    /// Pack a skillpack (validate + generate manifest + update versions)
-    Pack(PackArgs),
-    /// Publish a skillpack to a registry (pack + open PR)
-    Publish(PublishArgs),
-    /// Initialize a new skill registry
-    InitRegistry(InitRegistryArgs),
-    /// Scaffold a new skillpack directory
-    InitSkill(InitSkillArgs),
     /// Initialize a skillet.toml project manifest
-    InitProject(InitProjectArgs),
-    /// Install a skill from a registry
+    #[command(alias = "init-project")]
+    Init(InitArgs),
+    /// Install a skill from a repo
     Install(InstallArgs),
-    /// Search for skills in registries
+    /// Uninstall a skill
+    Uninstall(UninstallArgs),
+    /// Search for skills
     Search(SearchArgs),
     /// List all skill categories with counts
     Categories(CategoriesArgs),
@@ -63,21 +58,23 @@ enum Command {
     Info(InfoArgs),
     /// List installed skills
     List(ListArgs),
-    /// Manage trusted registries and pinned skills
+    /// Manage pinned skills
     Trust(TrustArgs),
     /// Audit installed skills against pinned content hashes
     Audit(AuditArgs),
+    /// Manage configured repos
+    Repo(RepoCommand),
     /// Generate initial configuration
     Setup(SetupArgs),
 }
 
 #[derive(clap::Args, Debug, Clone)]
 struct ServeArgs {
-    /// Path to a local registry directory (can be specified multiple times)
-    #[arg(long)]
-    registry: Vec<PathBuf>,
+    /// Path to a local repo directory (can be specified multiple times)
+    #[arg(long, alias = "registry")]
+    repo: Vec<PathBuf>,
 
-    /// Git URL to clone/pull the registry from (can be specified multiple times)
+    /// Git URL to clone/pull as a remote repo (can be specified multiple times)
     #[arg(long)]
     remote: Vec<String>,
 
@@ -86,15 +83,15 @@ struct ServeArgs {
     #[arg(long, default_value = "5m")]
     refresh_interval: String,
 
-    /// Directory to clone remote registries into
+    /// Directory to clone remote repos into
     #[arg(long)]
     cache_dir: Option<PathBuf>,
 
-    /// Subdirectory within registries that contains the skills
+    /// Subdirectory within repos that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
 
-    /// Watch local registry directories for changes and auto-reload
+    /// Watch local repo directories for changes and auto-reload
     #[arg(long)]
     watch: bool,
 
@@ -134,49 +131,7 @@ struct ValidateArgs {
 }
 
 #[derive(clap::Args, Debug)]
-struct PackArgs {
-    /// Path to the skillpack directory
-    path: PathBuf,
-
-    /// Skip safety scanning
-    #[arg(long)]
-    skip_safety: bool,
-}
-
-#[derive(clap::Args, Debug)]
-struct InitRegistryArgs {
-    /// Directory to create the registry in
-    path: PathBuf,
-
-    /// Registry name (defaults to directory name)
-    #[arg(long)]
-    name: Option<String>,
-
-    /// Registry description
-    #[arg(long)]
-    description: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-struct InitSkillArgs {
-    /// Path for the new skillpack (e.g. owner/skill-name)
-    path: PathBuf,
-
-    /// Skill description
-    #[arg(long)]
-    description: Option<String>,
-
-    /// Skill categories (can be specified multiple times)
-    #[arg(long)]
-    category: Vec<String>,
-
-    /// Skill tags (comma-separated)
-    #[arg(long, value_delimiter = ',')]
-    tags: Vec<String>,
-}
-
-#[derive(clap::Args, Debug)]
-struct InitProjectArgs {
+struct InitArgs {
     /// Directory for the project (defaults to current directory)
     #[arg(default_value = ".")]
     path: PathBuf,
@@ -196,47 +151,20 @@ struct InitProjectArgs {
     /// Include a \[skills\] section for multiple skills
     #[arg(long)]
     multi: bool,
-
-    /// Include a \[registry\] section
-    #[arg(long)]
-    registry: bool,
 }
 
-#[derive(clap::Args, Debug)]
-struct PublishArgs {
-    /// Path to the skillpack directory
-    path: PathBuf,
-
-    /// Target registry repo in owner/repo format (e.g. "joshrotenberg/skillet")
-    #[arg(long)]
-    repo: String,
-
-    /// Override the destination path in the registry (e.g. "acme/lang/java/maven-build").
-    /// If not set, defaults to `owner/name/`.
-    #[arg(long)]
-    registry_path: Option<String>,
-
-    /// Validate and show what would happen without creating a PR
-    #[arg(long)]
-    dry_run: bool,
-
-    /// Skip safety scanning
-    #[arg(long)]
-    skip_safety: bool,
-}
-
-/// Shared registry source arguments for CLI subcommands.
+/// Shared repo source arguments for CLI subcommands.
 #[derive(clap::Args, Debug, Clone)]
-struct RegistryArgs {
-    /// Path to a local registry directory (can be specified multiple times)
-    #[arg(long)]
-    registry: Vec<PathBuf>,
+struct RepoArgs {
+    /// Path to a local repo directory (can be specified multiple times)
+    #[arg(long, alias = "registry")]
+    repo: Vec<PathBuf>,
 
-    /// Git URL to clone/pull the registry from (can be specified multiple times)
+    /// Git URL to clone/pull the repo from (can be specified multiple times)
     #[arg(long)]
     remote: Vec<String>,
 
-    /// Subdirectory within registries that contains the skills
+    /// Subdirectory within repos that contains the skills
     #[arg(long)]
     subdir: Option<PathBuf>,
 
@@ -262,12 +190,22 @@ struct InstallArgs {
     #[arg(long)]
     version: Option<String>,
 
-    /// Require trusted registry or pinned hash (blocks unknown sources)
+    /// Require pinned hash (blocks unknown sources)
     #[arg(long)]
     require_trusted: bool,
 
     #[command(flatten)]
-    registries: RegistryArgs,
+    repos: RepoArgs,
+}
+
+#[derive(clap::Args, Debug)]
+struct UninstallArgs {
+    /// Skill to uninstall in owner/name format
+    skill: String,
+
+    /// Also remove the pinned content hash from trust state
+    #[arg(long)]
+    unpin: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -288,13 +226,13 @@ struct SearchArgs {
     owner: Option<String>,
 
     #[command(flatten)]
-    registries: RegistryArgs,
+    repos: RepoArgs,
 }
 
 #[derive(clap::Args, Debug)]
 struct CategoriesArgs {
     #[command(flatten)]
-    registries: RegistryArgs,
+    repos: RepoArgs,
 }
 
 #[derive(clap::Args, Debug)]
@@ -303,7 +241,7 @@ struct InfoArgs {
     skill: String,
 
     #[command(flatten)]
-    registries: RegistryArgs,
+    repos: RepoArgs,
 }
 
 #[derive(clap::Args, Debug)]
@@ -321,38 +259,12 @@ struct TrustArgs {
 
 #[derive(Subcommand, Debug)]
 enum TrustAction {
-    /// Add a registry to the trusted list
-    AddRegistry(TrustAddRegistryArgs),
-    /// Remove a registry from the trusted list
-    RemoveRegistry(TrustRemoveRegistryArgs),
-    /// List trusted registries and pinned skills
-    List(TrustListArgs),
+    /// List pinned skills
+    List,
     /// Pin a skill's content hash
     Pin(TrustPinArgs),
     /// Remove a skill's content hash pin
     Unpin(TrustUnpinArgs),
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustAddRegistryArgs {
-    /// Registry URL to trust
-    url: String,
-    /// Optional note describing why this registry is trusted
-    #[arg(long)]
-    note: Option<String>,
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustRemoveRegistryArgs {
-    /// Registry URL to remove
-    url: String,
-}
-
-#[derive(clap::Args, Debug)]
-struct TrustListArgs {
-    /// Only show trusted registries (omit pinned skills)
-    #[arg(long)]
-    registries_only: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -361,7 +273,7 @@ struct TrustPinArgs {
     skill: String,
 
     #[command(flatten)]
-    registries: RegistryArgs,
+    repos: RepoArgs,
 }
 
 #[derive(clap::Args, Debug)]
@@ -378,22 +290,50 @@ struct AuditArgs {
 }
 
 #[derive(clap::Args, Debug)]
+struct RepoCommand {
+    #[command(subcommand)]
+    action: RepoAction,
+}
+
+#[derive(Subcommand, Debug)]
+enum RepoAction {
+    /// Add a repo (local path or remote URL)
+    Add(RepoAddArgs),
+    /// Remove a repo (local path or remote URL)
+    Remove(RepoRemoveArgs),
+    /// List configured repos
+    List,
+}
+
+#[derive(clap::Args, Debug)]
+struct RepoAddArgs {
+    /// Repo to add (local path or remote URL)
+    repo: String,
+}
+
+#[derive(clap::Args, Debug)]
+struct RepoRemoveArgs {
+    /// Repo to remove (local path or remote URL)
+    repo: String,
+}
+
+#[derive(clap::Args, Debug)]
 struct SetupArgs {
-    /// Git URL of a remote registry to add (can be specified multiple times)
+    /// Git URL of a remote repo to add (can be specified multiple times)
     #[arg(long)]
     remote: Vec<String>,
 
-    /// Path to a local registry directory (can be specified multiple times)
-    #[arg(long)]
-    registry: Vec<PathBuf>,
+    /// Path to a local repo directory (can be specified multiple times)
+    #[arg(long, alias = "registry")]
+    repo: Vec<PathBuf>,
 
     /// Default install target (agents, claude, cursor, copilot, windsurf, gemini, all)
     #[arg(long, default_value = "agents")]
     target: String,
 
-    /// Skip adding the official registry as a remote
-    #[arg(long)]
-    no_official_registry: bool,
+    /// Skip adding the official repo as a remote
+    #[arg(long, alias = "no-official-registry")]
+    no_official_repo: bool,
 
     /// Overwrite existing config file
     #[arg(long)]
@@ -408,18 +348,16 @@ async fn main() -> ExitCode {
 
     let exit_code = match cli.command {
         Some(Command::Validate(args)) => cli::author::run_validate(args),
-        Some(Command::Pack(args)) => cli::author::run_pack(args),
-        Some(Command::Publish(args)) => cli::author::run_publish(args),
-        Some(Command::InitRegistry(args)) => cli::author::run_init_registry(args),
-        Some(Command::InitSkill(args)) => cli::author::run_init_skill(args),
-        Some(Command::InitProject(args)) => cli::author::run_init_project(args),
+        Some(Command::Init(args)) => cli::author::run_init(args),
         Some(Command::Install(args)) => cli::install::run_install(args),
+        Some(Command::Uninstall(args)) => cli::uninstall::run_uninstall(args),
         Some(Command::Search(args)) => cli::search::run_search(args),
         Some(Command::Categories(args)) => cli::search::run_categories(args),
         Some(Command::Info(args)) => cli::search::run_info(args),
         Some(Command::List(args)) => cli::search::run_list(args),
         Some(Command::Trust(args)) => cli::trust::run_trust(args),
         Some(Command::Audit(args)) => cli::trust::run_audit(args),
+        Some(Command::Repo(args)) => cli::repo::run_repo(args),
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None => run_serve(cli.serve).await,
@@ -490,8 +428,7 @@ impl ServerCapabilities {
 
 /// Build an MCP router from a loaded AppState and resolved capabilities.
 fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
-    let mut router =
-        McpRouter::new().server_info(&state.config.registry.name, env!("CARGO_PKG_VERSION"));
+    let mut router = McpRouter::new().server_info(&state.config.name, env!("CARGO_PKG_VERSION"));
 
     // Register tools conditionally
     if caps.tools.contains("search") {
@@ -691,19 +628,19 @@ async fn run_serve(args: ServeArgs) -> ExitCode {
 
 async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     let cache_base = args.cache_dir.clone().unwrap_or_else(default_cache_dir);
-    let mut registry_paths = Vec::new();
+    let mut repo_paths = Vec::new();
 
-    // Resolve local registries
-    for path in &args.registry {
+    // Resolve local repos
+    for path in &args.repo {
         let path = match &args.subdir {
             Some(sub) => path.join(sub),
             None => path.clone(),
         };
-        tracing::info!(registry = %path.display(), "Adding local registry");
-        registry_paths.push(path);
+        tracing::info!(repo = %path.display(), "Adding local repo");
+        repo_paths.push(path);
     }
 
-    // Resolve remote registries (clone/pull)
+    // Resolve remote repos (clone/pull)
     for url in &args.remote {
         let target = cache_dir_for_url(&cache_base, url);
         if let Some(parent) = target.parent() {
@@ -714,14 +651,14 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
             Some(sub) => target.join(sub),
             None => target,
         };
-        tracing::info!(registry = %path.display(), remote = %url, "Adding remote registry");
-        registry_paths.push(path);
+        tracing::info!(repo = %path.display(), remote = %url, "Adding remote repo");
+        repo_paths.push(path);
     }
 
-    // Fall back to the official registry if nothing is configured
+    // Fall back to the official repo if nothing is configured
     let mut default_remote_urls = Vec::new();
-    if registry_paths.is_empty() && args.remote.is_empty() {
-        let url = registry::DEFAULT_REGISTRY_URL;
+    if repo_paths.is_empty() && args.remote.is_empty() {
+        let url = repo::DEFAULT_REPO_URL;
         let target = cache_dir_for_url(&cache_base, url);
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent)?;
@@ -729,25 +666,25 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         git::clone_or_pull(url, &target)?;
         let path = match &args.subdir {
             Some(sub) => target.join(sub),
-            None => target.join(registry::DEFAULT_REGISTRY_SUBDIR),
+            None => target.join(repo::DEFAULT_REPO_SUBDIR),
         };
-        tracing::info!(registry = %path.display(), remote = %url, "Using default registry");
-        registry_paths.push(path);
+        tracing::info!(repo = %path.display(), remote = %url, "Using default repo");
+        repo_paths.push(path);
         default_remote_urls.push(url.to_string());
     }
 
-    tracing::info!(count = registry_paths.len(), "Starting skillet server");
+    tracing::info!(count = repo_paths.len(), "Starting skillet server");
 
     // Load CLI config early (used for discovery and capabilities)
     let cli_config = config::load_config().unwrap_or_default();
 
-    // Load and merge all registries
+    // Load and merge all repos
     let mut merged_index = state::SkillIndex::default();
-    let mut config = state::RegistryConfig::default();
+    let mut config = state::ServerConfig::default();
 
-    for (i, path) in registry_paths.iter().enumerate() {
+    for (i, path) in repo_paths.iter().enumerate() {
         if i == 0 {
-            // Use first registry's config for server name
+            // Use first repo's config for server name
             config = index::load_config(path)?;
         }
         let idx = index::load_index(path)?;
@@ -791,22 +728,20 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     let mut remote_urls = args.remote.clone();
     remote_urls.extend(default_remote_urls);
     let state = AppState::new(
-        registry_paths,
+        repo_paths,
         remote_urls.clone(),
         merged_index,
         skill_search,
         config,
     );
 
-    // Determine refresh interval: CLI flag wins, then registry defaults, then "5m"
+    // Determine refresh interval: CLI flag wins, then server config, then "5m"
     let effective_interval = if args.refresh_interval == "5m" {
-        // CLI is at default -- check registry config for an override
+        // CLI is at default -- check server config for an override
         state
             .config
-            .registry
-            .defaults
-            .as_ref()
-            .and_then(|d| d.refresh_interval.as_deref())
+            .refresh_interval
+            .as_deref()
             .unwrap_or("5m")
             .to_string()
     } else {
@@ -852,9 +787,9 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     Ok(())
 }
 
-/// Reload all skill indexes and rebuild search, writing cache for each registry.
+/// Reload all skill indexes and rebuild search, writing cache for each repo.
 async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
-    let paths = state.registry_paths.clone();
+    let paths = state.repo_paths.clone();
     let remote_urls = state.remote_urls.clone();
     let cache_base = default_cache_dir();
 
@@ -863,16 +798,16 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
         for path in &paths {
             match index::load_index(path) {
                 Ok(idx) => {
-                    // Write cache for this individual registry
-                    let source = registry_source_for_path(path, &remote_urls, &cache_base);
+                    // Write cache for this individual repo
+                    let source = repo_source_for_path(path, &remote_urls, &cache_base);
                     cache::write(&source, &idx);
                     merged.merge(idx);
                 }
                 Err(e) => {
                     tracing::warn!(
-                        registry = %path.display(),
+                        repo = %path.display(),
                         error = %e,
-                        "Failed to reload registry, skipping"
+                        "Failed to reload repo, skipping"
                     );
                 }
             }
@@ -912,25 +847,25 @@ async fn reload_index(state: &Arc<AppState>) -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Determine the cache `RegistrySource` for a given registry path.
+/// Determine the cache `RepoSource` for a given repo path.
 ///
 /// Checks if the path is a cached clone of a known remote URL; if so,
-/// returns `RegistrySource::Remote`, otherwise `RegistrySource::Local`.
-fn registry_source_for_path(
+/// returns `RepoSource::Remote`, otherwise `RepoSource::Local`.
+fn repo_source_for_path(
     path: &std::path::Path,
     remote_urls: &[String],
     cache_base: &std::path::Path,
-) -> RegistrySource {
+) -> RepoSource {
     for url in remote_urls {
         let checkout = cache_dir_for_url(cache_base, url);
         if path.starts_with(&checkout) {
-            return RegistrySource::Remote {
+            return RepoSource::Remote {
                 url: url.clone(),
                 checkout,
             };
         }
     }
-    RegistrySource::Local(path.to_path_buf())
+    RepoSource::Local(path.to_path_buf())
 }
 
 /// Spawn a background task that periodically pulls from a remote and
@@ -1006,19 +941,19 @@ fn spawn_refresh_task(state: Arc<AppState>, url: String, interval: Duration) {
     });
 }
 
-/// Spawn a background task that watches all local registry directories for
+/// Spawn a background task that watches all local repo directories for
 /// changes and reloads the index when relevant files are modified.
 fn spawn_watch_task(state: Arc<AppState>) {
     use notify_debouncer_mini::{new_debouncer, notify::RecursiveMode};
 
-    for path in &state.registry_paths {
+    for path in &state.repo_paths {
         tracing::info!(
-            registry = %path.display(),
-            "Watching local registry for changes"
+            repo = %path.display(),
+            "Watching local repo for changes"
         );
     }
 
-    let watch_paths: Vec<PathBuf> = state.registry_paths.clone();
+    let watch_paths: Vec<PathBuf> = state.repo_paths.clone();
 
     tokio::spawn(async move {
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
@@ -1040,7 +975,7 @@ fn spawn_watch_task(state: Arc<AppState>) {
                 debouncer
                     .watcher()
                     .watch(path, RecursiveMode::Recursive)
-                    .expect("failed to watch registry directory");
+                    .expect("failed to watch repo directory");
             }
 
             debouncer
@@ -1093,18 +1028,18 @@ fn spawn_watch_task(state: Arc<AppState>) {
 mod tests {
     use super::*;
 
-    fn test_registry_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-registry")
+    fn test_repo_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-repo")
     }
 
-    /// Build a router backed by the test-registry for integration tests.
+    /// Build a router backed by the test-repo for integration tests.
     fn test_router() -> tower_mcp::McpRouter {
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let skill_index = index::load_index(&repo_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -1404,7 +1339,7 @@ mod tests {
     /// Build a default ServeArgs for testing capability resolution.
     fn default_serve_args() -> ServeArgs {
         ServeArgs {
-            registry: Vec::new(),
+            repo: Vec::new(),
             remote: Vec::new(),
             refresh_interval: "5m".to_string(),
             cache_dir: None,
@@ -1687,9 +1622,9 @@ mod tests {
         use std::collections::HashMap;
 
         // Build a router with a synthetic local skill injected
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let mut skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let mut skill_index = index::load_index(&repo_path).expect("load index");
 
         // Insert a synthetic local skill
         skill_index.skills.insert(
@@ -1697,7 +1632,7 @@ mod tests {
             SkillEntry {
                 owner: "local".to_string(),
                 name: "my-local-skill".to_string(),
-                registry_path: None,
+                repo_path: None,
                 versions: vec![SkillVersion {
                     version: "0.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -1731,7 +1666,7 @@ mod tests {
 
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -1795,16 +1730,16 @@ mod tests {
         use std::collections::HashMap;
 
         // Build a router with a skill that has all versions yanked
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let mut skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let mut skill_index = index::load_index(&repo_path).expect("load index");
 
         skill_index.skills.insert(
             ("testowner".to_string(), "yanked-skill".to_string()),
             SkillEntry {
                 owner: "testowner".to_string(),
                 name: "yanked-skill".to_string(),
-                registry_path: None,
+                repo_path: None,
                 versions: vec![SkillVersion {
                     version: "1.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -1835,7 +1770,7 @@ mod tests {
 
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -1869,16 +1804,16 @@ mod tests {
         use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillVersion};
         use std::collections::HashMap;
 
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let mut skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let mut skill_index = index::load_index(&repo_path).expect("load index");
 
         skill_index.skills.insert(
             ("testowner".to_string(), "yanked-skill".to_string()),
             SkillEntry {
                 owner: "testowner".to_string(),
                 name: "yanked-skill".to_string(),
-                registry_path: None,
+                repo_path: None,
                 versions: vec![SkillVersion {
                     version: "1.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -1909,7 +1844,7 @@ mod tests {
 
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -1942,12 +1877,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_info_skill_excluded_when_not_in_caps() {
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let skill_index = index::load_index(&repo_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -2325,12 +2260,12 @@ mod tests {
     /// Build a router with limited capabilities and verify only those tools are listed.
     #[tokio::test]
     async fn test_mcp_limited_tools() {
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let skill_index = index::load_index(&repo_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -2530,12 +2465,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_mcp_compare_skills_excluded_when_not_in_caps() {
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let skill_index = index::load_index(&repo_path).expect("load index");
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -2566,7 +2501,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        let path = test_registry_path()
+        let path = test_repo_path()
             .join("joshrotenberg/rust-dev")
             .display()
             .to_string();
@@ -2617,7 +2552,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        let path = test_registry_path()
+        let path = test_repo_path()
             .join("acme/unsafe-demo")
             .display()
             .to_string();
@@ -2643,7 +2578,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        let path = test_registry_path()
+        let path = test_repo_path()
             .join("acme/unsafe-demo")
             .display()
             .to_string();
@@ -2668,7 +2603,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        let path = test_registry_path()
+        let path = test_repo_path()
             .join("acme/python-dev")
             .display()
             .to_string();
@@ -2802,7 +2737,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        // rust-dev has version 2026.02.24 in the test-registry
+        // rust-dev has version 2026.02.24 in the test-repo
         let result = client
             .read_resource("skillet://skills/joshrotenberg/rust-dev/2026.02.24")
             .await;
@@ -2835,16 +2770,16 @@ mod tests {
         use std::collections::HashMap;
 
         // Build state with a synthetic local skill
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let mut skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let mut skill_index = index::load_index(&repo_path).expect("load index");
 
         skill_index.skills.insert(
             ("local".to_string(), "discovered-tool".to_string()),
             SkillEntry {
                 owner: "local".to_string(),
                 name: "discovered-tool".to_string(),
-                registry_path: None,
+                repo_path: None,
                 versions: vec![SkillVersion {
                     version: "0.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -2878,7 +2813,7 @@ mod tests {
 
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -2902,10 +2837,10 @@ mod tests {
             "local skill should appear in search: {text}"
         );
 
-        // Registry skills should also still appear
+        // Repo skills should also still appear
         assert!(
             text.contains("rust-dev"),
-            "registry skills should still appear: {text}"
+            "repo skills should still appear: {text}"
         );
     }
 
@@ -2914,16 +2849,16 @@ mod tests {
         use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
         use std::collections::HashMap;
 
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let mut skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let mut skill_index = index::load_index(&repo_path).expect("load index");
 
         skill_index.skills.insert(
             ("local".to_string(), "readable-local".to_string()),
             SkillEntry {
                 owner: "local".to_string(),
                 name: "readable-local".to_string(),
-                registry_path: None,
+                repo_path: None,
                 versions: vec![SkillVersion {
                     version: "0.0.0".to_string(),
                     metadata: SkillMetadata {
@@ -2957,7 +2892,7 @@ mod tests {
 
         let skill_search = search::SkillSearch::build(&skill_index);
         let state = AppState::new(
-            vec![registry_path],
+            vec![repo_path],
             Vec::new(),
             skill_index,
             skill_search,
@@ -2993,21 +2928,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_mcp_registry_wins_over_local_on_collision() {
+    async fn test_mcp_repo_wins_over_local_on_collision() {
         use skillet_mcp::state::{SkillEntry, SkillInfo, SkillMetadata, SkillSource, SkillVersion};
         use std::collections::HashMap;
 
-        let registry_path = test_registry_path();
-        let config = index::load_config(&registry_path).expect("load config");
-        let skill_index = index::load_index(&registry_path).expect("load index");
+        let repo_path = test_repo_path();
+        let config = index::load_config(&repo_path).expect("load config");
+        let skill_index = index::load_index(&repo_path).expect("load index");
 
-        // Merge a local skill with the same (owner, name) as a registry skill
-        // Since we build the index from the registry first, and the merge is
-        // first-wins, the registry should win.
+        // Merge a local skill with the same (owner, name) as a repo skill.
+        // Since we build the index from the repo first, and the merge is
+        // first-wins, the repo should win.
         let mut merged = skill_index;
 
         // Try to insert a local version of "joshrotenberg/rust-dev"
-        // Since it already exists from the registry, merge should keep the registry version
+        // Since it already exists from the repo, merge should keep the repo version
         let local_index = {
             let mut idx = skillet_mcp::state::SkillIndex::default();
             idx.skills.insert(
@@ -3015,7 +2950,7 @@ mod tests {
                 SkillEntry {
                     owner: "joshrotenberg".to_string(),
                     name: "rust-dev".to_string(),
-                    registry_path: None,
+                    repo_path: None,
                     versions: vec![SkillVersion {
                         version: "0.0.0".to_string(),
                         metadata: SkillMetadata {
@@ -3051,13 +2986,7 @@ mod tests {
         merged.merge(local_index);
 
         let skill_search = search::SkillSearch::build(&merged);
-        let state = AppState::new(
-            vec![registry_path],
-            Vec::new(),
-            merged,
-            skill_search,
-            config,
-        );
+        let state = AppState::new(vec![repo_path], Vec::new(), merged, skill_search, config);
         let caps = ServerCapabilities {
             tools: ALL_TOOL_NAMES.iter().map(|&s| s.to_string()).collect(),
             resources: ALL_RESOURCE_NAMES.iter().map(|&s| s.to_string()).collect(),
@@ -3066,7 +2995,7 @@ mod tests {
         let mut client = tower_mcp::TestClient::from_router(router);
         client.initialize().await;
 
-        // Info should show the registry version, not the local one
+        // Info should show the repo version, not the local one
         let result = client
             .call_tool(
                 "info_skill",
@@ -3076,11 +3005,11 @@ mod tests {
         let text = result.all_text();
         assert!(
             !text.contains("LOCAL VERSION SHOULD NOT WIN"),
-            "registry should win over local: {text}"
+            "repo should win over local: {text}"
         );
         assert!(
             text.contains("2026.02.24"),
-            "should show registry version: {text}"
+            "should show repo version: {text}"
         );
     }
 }

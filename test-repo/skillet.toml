@@ -1,0 +1,7 @@
+[project]
+name = "skillet"
+description = "Test registry for skillet development"
+
+[[project.authors]]
+name = "Josh Rotenberg"
+github = "joshrotenberg"

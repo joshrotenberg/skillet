@@ -114,10 +114,6 @@ pub enum Error {
         source: std::io::Error,
     },
 
-    // -- Publish --
-    #[error("{0}")]
-    Publish(String),
-
     // -- Generic --
     #[error("{context}: {source}")]
     Io {

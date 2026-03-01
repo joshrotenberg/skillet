@@ -124,7 +124,7 @@ mod tests {
         SkillEntry {
             owner: owner.to_string(),
             name: name.to_string(),
-            registry_path: None,
+            repo_path: None,
             source: Default::default(),
             versions: vec![SkillVersion {
                 version: "1.0.0".to_string(),

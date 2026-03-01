@@ -1,9 +1,8 @@
-//! Trust tiers and content hash pinning for skill registries.
+//! Trust: content hash pinning for installed skills.
 //!
 //! The trust state lives at `~/.config/skillet/trust.toml` and tracks which
-//! registries the user trusts and which installed skills have pinned content
-//! hashes. This lets users distinguish trusted registries (their own, their
-//! team's) from unknown ones, and detect when installed skill content changes.
+//! installed skills have pinned content hashes. This lets users detect when
+//! installed skill content changes unexpectedly.
 
 use std::path::{Path, PathBuf};
 
@@ -14,34 +13,22 @@ use crate::error::Error;
 use crate::integrity;
 use crate::manifest::InstalledManifest;
 
-/// Trust tier assigned to a registry during install.
+/// Trust tier assigned to a skill during install.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrustTier {
-    /// Registry is explicitly trusted by the user.
-    Trusted,
-    /// Skill has a pinned content hash (previously installed).
+    /// Skill has a pinned content hash that matches.
     Reviewed,
-    /// Registry is not trusted and skill is not pinned.
+    /// Skill is not pinned.
     Unknown,
 }
 
 impl std::fmt::Display for TrustTier {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Trusted => write!(f, "trusted"),
             Self::Reviewed => write!(f, "reviewed"),
             Self::Unknown => write!(f, "unknown"),
         }
     }
-}
-
-/// A registry the user has explicitly marked as trusted.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct TrustedRegistry {
-    pub registry: String,
-    pub trusted_at: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
 }
 
 /// A skill with a pinned content hash.
@@ -50,16 +37,15 @@ pub struct PinnedSkill {
     pub owner: String,
     pub name: String,
     pub version: String,
-    pub registry: String,
+    #[serde(alias = "registry")]
+    pub repo: String,
     pub content_hash: String,
     pub pinned_at: String,
 }
 
-/// Persistent trust state: trusted registries and pinned skills.
+/// Persistent trust state: pinned skills.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct TrustState {
-    #[serde(default)]
-    pub trusted_registries: Vec<TrustedRegistry>,
     #[serde(default)]
     pub pinned_skills: Vec<PinnedSkill>,
 }
@@ -160,39 +146,13 @@ pub fn save_to(state: &TrustState, path: &Path) -> crate::error::Result<()> {
 // -- TrustState methods --
 
 impl TrustState {
-    /// Add a trusted registry. No-op if already present.
-    pub fn add_registry(&mut self, registry: &str, note: Option<&str>) {
-        if self.is_trusted(registry) {
-            return;
-        }
-        self.trusted_registries.push(TrustedRegistry {
-            registry: registry.to_string(),
-            trusted_at: config::now_iso8601(),
-            note: note.map(|s| s.to_string()),
-        });
-    }
-
-    /// Remove a trusted registry. Returns true if it was present.
-    pub fn remove_registry(&mut self, registry: &str) -> bool {
-        let before = self.trusted_registries.len();
-        self.trusted_registries.retain(|r| r.registry != registry);
-        self.trusted_registries.len() < before
-    }
-
-    /// Check whether a registry is trusted.
-    pub fn is_trusted(&self, registry: &str) -> bool {
-        self.trusted_registries
-            .iter()
-            .any(|r| r.registry == registry)
-    }
-
     /// Pin a skill's content hash. Replaces an existing pin for the same owner/name.
     pub fn pin_skill(
         &mut self,
         owner: &str,
         name: &str,
         version: &str,
-        registry: &str,
+        repo: &str,
         content_hash: &str,
     ) {
         // Upsert: remove existing pin for this owner/name, then add new
@@ -202,7 +162,7 @@ impl TrustState {
             owner: owner.to_string(),
             name: name.to_string(),
             version: version.to_string(),
-            registry: registry.to_string(),
+            repo: repo.to_string(),
             content_hash: content_hash.to_string(),
             pinned_at: config::now_iso8601(),
         });
@@ -229,23 +189,14 @@ impl TrustState {
 /// Evaluate trust for a skill install.
 ///
 /// Returns a `TrustCheck` describing the tier, any pinned hash, and a
-/// human-readable reason.
+/// human-readable reason. Trust is based solely on pinned content hashes.
 pub fn check_trust(
     state: &TrustState,
-    registry_id: &str,
+    _repo_id: &str,
     owner: &str,
     name: &str,
     content_hash: &str,
 ) -> TrustCheck {
-    // Check if the registry is trusted
-    if state.is_trusted(registry_id) {
-        return TrustCheck {
-            tier: TrustTier::Trusted,
-            pinned_hash: state.find_pin(owner, name).map(|p| p.content_hash.clone()),
-            reason: format!("registry '{registry_id}' is trusted"),
-        };
-    }
-
     // Check if there's a pinned hash for this skill
     if let Some(pin) = state.find_pin(owner, name) {
         if pin.content_hash == content_hash {
@@ -270,7 +221,7 @@ pub fn check_trust(
     TrustCheck {
         tier: TrustTier::Unknown,
         pinned_hash: None,
-        reason: format!("registry '{registry_id}' is not trusted and {owner}/{name} is not pinned"),
+        reason: format!("{owner}/{name} is not pinned"),
     }
 }
 
@@ -356,7 +307,6 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nonexistent.toml");
         let state = load_from(&path).unwrap();
-        assert!(state.trusted_registries.is_empty());
         assert!(state.pinned_skills.is_empty());
     }
 
@@ -366,7 +316,6 @@ mod tests {
         let path = tmp.path().join("trust.toml");
 
         let mut state = TrustState::default();
-        state.add_registry("https://github.com/owner/repo.git", Some("my registry"));
         state.pin_skill(
             "owner",
             "skill",
@@ -378,15 +327,6 @@ mod tests {
         save_to(&state, &path).unwrap();
         let loaded = load_from(&path).unwrap();
 
-        assert_eq!(loaded.trusted_registries.len(), 1);
-        assert_eq!(
-            loaded.trusted_registries[0].registry,
-            "https://github.com/owner/repo.git"
-        );
-        assert_eq!(
-            loaded.trusted_registries[0].note.as_deref(),
-            Some("my registry")
-        );
         assert_eq!(loaded.pinned_skills.len(), 1);
         assert_eq!(loaded.pinned_skills[0].owner, "owner");
         assert_eq!(loaded.pinned_skills[0].content_hash, "sha256:abc123");
@@ -401,22 +341,6 @@ mod tests {
     }
 
     // -- Trust checking tests --
-
-    #[test]
-    fn test_check_trust_trusted_registry() {
-        let mut state = TrustState::default();
-        state.add_registry("https://github.com/owner/repo.git", None);
-
-        let check = check_trust(
-            &state,
-            "https://github.com/owner/repo.git",
-            "owner",
-            "skill",
-            "sha256:abc",
-        );
-        assert_eq!(check.tier, TrustTier::Trusted);
-        assert!(check.reason.contains("trusted"));
-    }
 
     #[test]
     fn test_check_trust_pinned_match() {
@@ -476,38 +400,7 @@ mod tests {
         );
         assert_eq!(check.tier, TrustTier::Unknown);
         assert!(check.pinned_hash.is_none());
-        assert!(check.reason.contains("not trusted"));
-    }
-
-    // -- Registry management tests --
-
-    #[test]
-    fn test_add_registry() {
-        let mut state = TrustState::default();
-        state.add_registry("https://github.com/owner/repo.git", None);
-        assert!(state.is_trusted("https://github.com/owner/repo.git"));
-        assert!(!state.is_trusted("https://github.com/other/repo.git"));
-    }
-
-    #[test]
-    fn test_add_registry_idempotent() {
-        let mut state = TrustState::default();
-        state.add_registry("https://github.com/owner/repo.git", None);
-        state.add_registry("https://github.com/owner/repo.git", Some("dup"));
-        assert_eq!(state.trusted_registries.len(), 1);
-    }
-
-    #[test]
-    fn test_remove_registry() {
-        let mut state = TrustState::default();
-        state.add_registry("https://github.com/owner/repo.git", None);
-
-        let removed = state.remove_registry("https://github.com/owner/repo.git");
-        assert!(removed);
-        assert!(!state.is_trusted("https://github.com/owner/repo.git"));
-
-        let removed = state.remove_registry("https://github.com/owner/repo.git");
-        assert!(!removed);
+        assert!(check.reason.contains("not pinned"));
     }
 
     // -- Pin management tests --
@@ -562,7 +455,7 @@ mod tests {
                 owner: "owner".to_string(),
                 name: "skill".to_string(),
                 version: "1.0.0".to_string(),
-                registry: "reg".to_string(),
+                repo: "reg".to_string(),
                 checksum: hash.clone(),
                 installed_to: skill_dir,
                 installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -590,7 +483,7 @@ mod tests {
                 owner: "owner".to_string(),
                 name: "skill".to_string(),
                 version: "1.0.0".to_string(),
-                registry: "reg".to_string(),
+                repo: "reg".to_string(),
                 checksum: "sha256:whatever".to_string(),
                 installed_to: skill_dir,
                 installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -624,7 +517,7 @@ mod tests {
                 owner: "owner".to_string(),
                 name: "skill".to_string(),
                 version: "1.0.0".to_string(),
-                registry: "reg".to_string(),
+                repo: "reg".to_string(),
                 checksum: "sha256:abc".to_string(),
                 installed_to: skill_dir,
                 installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -649,7 +542,7 @@ mod tests {
                 owner: "owner".to_string(),
                 name: "skill".to_string(),
                 version: "1.0.0".to_string(),
-                registry: "reg".to_string(),
+                repo: "reg".to_string(),
                 checksum: "sha256:abc".to_string(),
                 installed_to: skill_dir,
                 installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -681,7 +574,7 @@ mod tests {
                     owner: "alice".to_string(),
                     name: "skill1".to_string(),
                     version: "1.0.0".to_string(),
-                    registry: "reg".to_string(),
+                    repo: "reg".to_string(),
                     checksum: "sha256:a".to_string(),
                     installed_to: dir1,
                     installed_at: "2026-01-01T00:00:00Z".to_string(),
@@ -690,7 +583,7 @@ mod tests {
                     owner: "bob".to_string(),
                     name: "skill2".to_string(),
                     version: "1.0.0".to_string(),
-                    registry: "reg".to_string(),
+                    repo: "reg".to_string(),
                     checksum: "sha256:b".to_string(),
                     installed_to: dir2,
                     installed_at: "2026-01-01T00:00:00Z".to_string(),

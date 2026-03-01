@@ -28,7 +28,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
         .description(
             "Show status of installed skills including version, install location, \
              integrity check, trust status, and whether updates are available \
-             from the registry.",
+             from the repo.",
         )
         .read_only()
         .idempotent()
@@ -104,15 +104,14 @@ pub fn build(state: Arc<AppState>) -> Tool {
                         output.push_str("**Pinned:** no\n");
                     }
 
-                    // Check for registry update
+                    // Check for repo update
                     if let Some(entry) =
                         index.skills.get(&(skill.owner.clone(), skill.name.clone()))
                         && let Some(latest) = entry.latest()
                     {
-                        let registry_version = &latest.metadata.skill.version;
-                        if *registry_version != skill.version {
-                            output
-                                .push_str(&format!("**Update available:** v{registry_version}\n"));
+                        let repo_version = &latest.metadata.skill.version;
+                        if *repo_version != skill.version {
+                            output.push_str(&format!("**Update available:** v{repo_version}\n"));
                         } else {
                             output.push_str("**Up to date:** yes\n");
                         }

@@ -1,7 +1,7 @@
 //! Project manifest (`skillet.toml`) types and loading.
 //!
 //! A `skillet.toml` file is a unified manifest that can describe a project,
-//! a single inline skill, a multi-skill directory, a registry, or any
+//! a single inline skill, a multi-skill directory, or any
 //! combination. It enables embedding skills in any repository with zero
 //! configuration beyond a SKILL.md file.
 
@@ -28,10 +28,6 @@ pub struct SkilletToml {
     /// Multiple skills in a subdirectory
     #[serde(default)]
     pub skills: Option<SkillsSection>,
-
-    /// Registry configuration
-    #[serde(default)]
-    pub registry: Option<RegistrySection>,
 }
 
 /// Project metadata section.
@@ -140,53 +136,9 @@ impl SkillsSection {
     }
 }
 
-/// Registry section, matching the existing `RegistryConfig` structure.
-///
-/// The field names mirror `state::RegistryInfo` so that existing registry
-/// loading works transparently.
-#[derive(Debug, Clone, Deserialize)]
-pub struct RegistrySection {
-    /// Registry name
-    pub name: String,
-
-    /// Schema version (always 1 for now)
-    #[serde(default = "default_registry_version")]
-    pub version: u32,
-
-    /// Registry description
-    #[serde(default)]
-    pub description: Option<String>,
-
-    /// Maintainer information
-    #[serde(default)]
-    pub maintainer: Option<crate::state::RegistryMaintainer>,
-
-    /// URL endpoints for non-git-backed registries
-    #[serde(default)]
-    pub urls: Option<crate::state::RegistryUrls>,
-
-    /// Auth configuration
-    #[serde(default)]
-    pub auth: Option<crate::state::RegistryAuth>,
-
-    /// Suggested companion registries
-    #[serde(default)]
-    pub suggests: Option<Vec<crate::state::RegistrySuggestion>>,
-
-    /// Server defaults
-    #[serde(default)]
-    pub defaults: Option<crate::state::RegistryDefaults>,
-}
-
-fn default_registry_version() -> u32 {
-    1
-}
-
 /// What role this manifest serves, inferred from which sections are present.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ManifestRole {
-    /// Only `[registry]` section -- pure skill registry
-    Registry,
     /// `[skill]` section (with or without `[project]`) -- single inline skill
     SingleSkill,
     /// `[skills]` section (with or without `[project]`) -- multi-skill directory
@@ -198,35 +150,13 @@ pub enum ManifestRole {
 impl SkilletToml {
     /// Determine what role this manifest serves.
     pub fn role(&self) -> ManifestRole {
-        // A manifest can have multiple sections; priority is:
-        // skill/skills > registry > project-only
         if self.skill.is_some() {
             ManifestRole::SingleSkill
         } else if self.skills.is_some() {
             ManifestRole::MultiSkill
-        } else if self.registry.is_some() {
-            ManifestRole::Registry
         } else {
             ManifestRole::ProjectOnly
         }
-    }
-
-    /// Convert the `[registry]` section into a `RegistryConfig` for backward
-    /// compatibility with the existing registry loading pipeline.
-    pub fn into_registry_config(&self) -> Option<crate::state::RegistryConfig> {
-        let reg = self.registry.as_ref()?;
-        Some(crate::state::RegistryConfig {
-            registry: crate::state::RegistryInfo {
-                name: reg.name.clone(),
-                version: reg.version,
-                description: reg.description.clone(),
-                maintainer: reg.maintainer.clone(),
-                urls: reg.urls.clone(),
-                auth: reg.auth.clone(),
-                suggests: reg.suggests.clone(),
-                defaults: reg.defaults.clone(),
-            },
-        })
     }
 }
 
@@ -697,7 +627,7 @@ fn build_embedded_entry(
     Ok(crate::state::SkillEntry {
         owner,
         name,
-        registry_path: None,
+        repo_path: None,
         source: crate::state::SkillSource::Embedded {
             project: project_name.to_string(),
             path: skill_path.to_path_buf(),
@@ -809,7 +739,7 @@ fn build_embedded_entry_from_dir(
     Ok(crate::state::SkillEntry {
         owner,
         name,
-        registry_path: None,
+        repo_path: None,
         source: crate::state::SkillSource::Embedded {
             project: project_name.to_string(),
             path: skill_dir.to_path_buf(),
@@ -913,29 +843,7 @@ mod tests {
         assert!(manifest.project.is_none());
         assert!(manifest.skill.is_none());
         assert!(manifest.skills.is_none());
-        assert!(manifest.registry.is_none());
         assert_eq!(manifest.role(), ManifestRole::ProjectOnly);
-    }
-
-    #[test]
-    fn test_load_registry_only() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            r#"
-[registry]
-name = "my-registry"
-description = "Test registry"
-"#,
-        )
-        .unwrap();
-
-        let manifest = load_skillet_toml(tmp.path()).unwrap().unwrap();
-        assert_eq!(manifest.role(), ManifestRole::Registry);
-
-        let reg = manifest.registry.as_ref().unwrap();
-        assert_eq!(reg.name, "my-registry");
-        assert_eq!(reg.description.as_deref(), Some("Test registry"));
     }
 
     #[test]
@@ -988,51 +896,6 @@ members = ["api-usage", "debugging"]
         let skills = manifest.skills.as_ref().unwrap();
         assert_eq!(skills.resolved_path(), "skills/");
         assert_eq!(skills.members, vec!["api-usage", "debugging"]);
-    }
-
-    #[test]
-    fn test_load_hybrid_skill_and_registry() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            r#"
-[project]
-name = "my-registry"
-
-[registry]
-name = "community-skills"
-
-[skill]
-name = "meta-skill"
-"#,
-        )
-        .unwrap();
-
-        let manifest = load_skillet_toml(tmp.path()).unwrap().unwrap();
-        // skill takes priority over registry for role determination
-        assert_eq!(manifest.role(), ManifestRole::SingleSkill);
-        assert!(manifest.registry.is_some());
-    }
-
-    #[test]
-    fn test_into_registry_config() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(
-            tmp.path().join("skillet.toml"),
-            r#"
-[registry]
-name = "test-reg"
-version = 1
-description = "A test"
-"#,
-        )
-        .unwrap();
-
-        let manifest = load_skillet_toml(tmp.path()).unwrap().unwrap();
-        let config = manifest.into_registry_config().unwrap();
-        assert_eq!(config.registry.name, "test-reg");
-        assert_eq!(config.registry.version, 1);
-        assert_eq!(config.registry.description.as_deref(), Some("A test"));
     }
 
     #[test]

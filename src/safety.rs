@@ -790,12 +790,12 @@ Use cargo fmt before committing. Run clippy with -D warnings.
         assert!(finding.matched.ends_with("..."));
     }
 
-    // -- Real test-registry skills should be clean --
+    // -- Real test-repo skills should be clean --
 
     #[test]
     fn test_real_skills_clean() {
-        let test_registry = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-registry");
-        if !test_registry.exists() {
+        let test_repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo");
+        if !test_repo.exists() {
             return;
         }
 
@@ -808,7 +808,7 @@ Use cargo fmt before committing. Run clippy with -D warnings.
         ];
 
         for skill_path in &good_skills {
-            let dir = test_registry.join(skill_path);
+            let dir = test_repo.join(skill_path);
             if !dir.exists() {
                 continue;
             }

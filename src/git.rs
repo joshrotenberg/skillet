@@ -1,4 +1,4 @@
-//! Git operations for remote registry support.
+//! Git operations for remote repo support.
 //!
 //! Shells out to the `git` CLI for clone, pull, and HEAD inspection.
 //! No `git2`/`gix` dependency -- keeps things simple.
@@ -80,7 +80,7 @@ pub fn clone_or_pull(url: &str, target: &Path) -> crate::error::Result<()> {
         tracing::info!(path = %target.display(), "Pulling existing clone");
         pull(target)
     } else {
-        tracing::info!(url, path = %target.display(), "Cloning remote registry");
+        tracing::info!(url, path = %target.display(), "Cloning remote repo");
         clone(url, target)
     }
 }

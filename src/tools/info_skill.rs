@@ -36,7 +36,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     Some(e) => e,
                     None => {
                         return Ok(CallToolResult::error(format!(
-                            "Skill '{}/{}' not found in any registry.",
+                            "Skill '{}/{}' not found in any repo.",
                             input.owner, input.name
                         )));
                     }
@@ -140,7 +140,7 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 }
 
                 // Registry path for nested skills
-                if let Some(ref rpath) = entry.registry_path {
+                if let Some(ref rpath) = entry.repo_path {
                     output.push_str(&format!("**Registry path:** {rpath}\n"));
                 }
 
