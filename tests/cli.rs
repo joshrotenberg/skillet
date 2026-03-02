@@ -980,3 +980,23 @@ fn info_official_skill() {
                 .and(predicate::str::contains("consumer")),
         );
 }
+
+// ── Install trust warning ────────────────────────────────────────────
+
+#[test]
+fn install_trust_warning_is_soft() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    std::fs::create_dir_all(&home).expect("create home");
+
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(tmp.path())
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("Tip:").and(predicate::str::contains("Warning:").not()))
+        .stdout(predicate::str::contains("Installed joshrotenberg/rust-dev"));
+}
