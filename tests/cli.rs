@@ -17,7 +17,7 @@ fn test_npm_repo() -> PathBuf {
 }
 
 fn official_repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("registry")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("skills")
 }
 
 #[allow(deprecated)] // cargo_bin_cmd! macro has compile-time issues; cargo_bin works fine

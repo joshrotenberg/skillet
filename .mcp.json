@@ -2,14 +2,14 @@
   "mcpServers": {
     "skillet": {
       "command": "cargo",
-      "args": ["run", "--", "--registry", "test-registry"],
+      "args": ["run", "--", "--registry", "test-repo", "--registry", "skills"],
       "env": {
         "RUST_LOG": "skillet=debug"
       }
     },
     "skillet-remote": {
       "command": "cargo",
-      "args": ["run", "--", "--remote", "https://github.com/joshrotenberg/skillet.git", "--subdir", "test-registry"],
+      "args": ["run", "--", "--remote", "https://github.com/joshrotenberg/skillet.git", "--subdir", "test-repo"],
       "env": {
         "RUST_LOG": "skillet=debug"
       }
