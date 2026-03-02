@@ -8,6 +8,7 @@ mod resources;
 mod tools;
 
 use std::collections::HashSet;
+use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -344,7 +345,8 @@ struct SetupArgs {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let is_serve = matches!(cli.command, Some(Command::Serve(_)) | None);
+    let interactive_tty = cli.command.is_none() && std::io::stdin().is_terminal();
+    let is_serve = matches!(cli.command, Some(Command::Serve(_)) | None) && !interactive_tty;
 
     let exit_code = match cli.command {
         Some(Command::Validate(args)) => cli::author::run_validate(args),
@@ -360,6 +362,17 @@ async fn main() -> ExitCode {
         Some(Command::Repo(args)) => cli::repo::run_repo(args),
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
         Some(Command::Serve(args)) => run_serve(args).await,
+        None if interactive_tty => {
+            eprintln!("Skillet - skill registry for AI agents\n");
+            eprintln!("Get started:");
+            eprintln!("  skillet search \"*\"          # browse all skills");
+            eprintln!("  skillet install owner/name  # install a skill");
+            eprintln!("  skillet --help              # see all commands\n");
+            eprintln!("To start the MCP server:");
+            eprintln!("  skillet serve               # stdio transport");
+            eprintln!("  skillet serve --http :8080  # HTTP transport");
+            ExitCode::SUCCESS
+        }
         None => run_serve(cli.serve).await,
     };
 
