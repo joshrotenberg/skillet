@@ -120,7 +120,7 @@ struct ServeArgs {
     #[arg(long, value_delimiter = ',')]
     resources: Vec<String>,
 
-    /// Don't follow [[suggest]] entries from loaded repos
+    /// Don't follow `[[suggest]]` entries from loaded repos
     #[arg(long)]
     no_suggest: bool,
 }
@@ -177,7 +177,7 @@ struct RepoArgs {
     #[arg(long)]
     no_cache: bool,
 
-    /// Don't follow [[suggest]] entries from loaded repos
+    /// Don't follow `[[suggest]]` entries from loaded repos
     #[arg(long)]
     no_suggest: bool,
 }
