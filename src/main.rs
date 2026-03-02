@@ -1044,9 +1044,13 @@ fn spawn_watch_task(state: Arc<AppState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use skillet_mcp::testutil::TestRepo;
+    use std::sync::LazyLock;
+
+    static TEST_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::standard);
 
     fn test_repo_path() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-repo")
+        TEST_REPO.path().to_path_buf()
     }
 
     /// Build a router backed by the test-repo for integration tests.

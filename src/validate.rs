@@ -308,17 +308,18 @@ fn check_frontmatter_consistency(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::TestRepo;
+    use std::sync::LazyLock;
 
-    fn test_repo() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo")
+    static TEST_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::standard);
+
+    fn test_repo() -> &'static std::path::Path {
+        TEST_REPO.path()
     }
 
     #[test]
     fn test_validate_valid_skill() {
         let dir = test_repo().join("joshrotenberg/rust-dev");
-        if !dir.exists() {
-            return;
-        }
         let result = validate_skillpack(&dir).expect("should validate");
         assert_eq!(result.owner, "joshrotenberg");
         assert_eq!(result.name, "rust-dev");
@@ -330,9 +331,6 @@ mod tests {
     #[test]
     fn test_validate_skill_with_extra_files() {
         let dir = test_repo().join("joshrotenberg/skillet-dev");
-        if !dir.exists() {
-            return;
-        }
         let result = validate_skillpack(&dir).expect("should validate");
         assert_eq!(result.owner, "joshrotenberg");
         assert_eq!(result.name, "skillet-dev");
@@ -431,9 +429,6 @@ description = "test"
     #[test]
     fn test_validate_with_verified_manifest() {
         let dir = test_repo().join("joshrotenberg/code-review");
-        if !dir.exists() {
-            return;
-        }
         let result = validate_skillpack(&dir).expect("should validate");
         assert_eq!(result.manifest_ok, Some(true));
     }
@@ -441,9 +436,6 @@ description = "test"
     #[test]
     fn test_validate_with_mismatched_manifest() {
         let dir = test_repo().join("acme/git-conventions");
-        if !dir.exists() {
-            return;
-        }
         let result = validate_skillpack(&dir).expect("should validate");
         assert_eq!(result.manifest_ok, Some(false));
         assert!(
@@ -473,9 +465,6 @@ description = "test"
     #[test]
     fn test_validate_lenient_with_skill_toml_delegates_strict() {
         let dir = test_repo().join("joshrotenberg/rust-dev");
-        if !dir.exists() {
-            return;
-        }
         let result = validate_skillpack_lenient(&dir, None).expect("should validate");
         assert_eq!(result.owner, "joshrotenberg");
         assert_eq!(result.name, "rust-dev");

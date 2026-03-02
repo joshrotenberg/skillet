@@ -23,3 +23,6 @@ pub mod state;
 pub mod trust;
 pub mod validate;
 pub mod version;
+
+#[cfg(any(test, feature = "testutil"))]
+pub mod testutil;
