@@ -1,6 +1,6 @@
 ---
 name: skill-author
-description: Authoring and publishing skills for the skillet registry. Covers the skill format, validation, packing, and publishing workflow.
+description: Authoring and publishing skills for skillet. Covers the skill format, validation, packing, and publishing workflow.
 ---
 
 ## Skill Authoring Guide
@@ -118,12 +118,12 @@ Validates, generates `MANIFEST.sha256` (content hashes), and updates
 ### Publishing
 
 ```bash
-skillet publish path/to/skill --repo owner/registry-repo
-skillet publish path/to/skill --repo owner/registry-repo --dry-run
-skillet publish path/to/skill --repo owner/registry-repo --registry-path custom/path
+skillet publish path/to/skill --repo owner/skill-repo
+skillet publish path/to/skill --repo owner/skill-repo --dry-run
+skillet publish path/to/skill --repo owner/skill-repo --registry-path custom/path
 ```
 
-Publishing: packs the skill, forks the registry repo, creates a branch,
+Publishing: packs the skill, forks the target repo, creates a branch,
 copies files, and opens a PR via `gh` CLI.
 
 ### Project Manifest
@@ -133,5 +133,5 @@ Embed skills in any repository with `skillet.toml`:
 ```bash
 skillet init-project path --skill     # single inline skill
 skillet init-project path --multi     # multi-skill directory
-skillet init-project path --registry  # registry configuration
+skillet init-project path --registry  # repo configuration
 ```

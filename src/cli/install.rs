@@ -43,6 +43,7 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
         &args.repos.remote,
         &cli_config,
         args.repos.subdir.as_deref(),
+        args.repos.no_suggest,
     ) {
         Ok(r) => r,
         Err(e) => {

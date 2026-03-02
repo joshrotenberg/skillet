@@ -1,4 +1,4 @@
-//! Skillet: a skill registry toolkit for AI agents.
+//! Skillet: a skill discovery toolkit for AI agents.
 //!
 //! This library provides the core functionality for loading, searching,
 //! validating, and installing skills from repos. The binary crate

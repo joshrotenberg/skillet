@@ -2,7 +2,7 @@
   "mcpServers": {
     "skillet": {
       "command": "cargo",
-      "args": ["run", "--", "--registry", "test-repo", "--registry", "skills"],
+      "args": ["run", "--", "--repo", "test-repo", "--repo", "skills"],
       "env": {
         "RUST_LOG": "skillet=debug"
       }

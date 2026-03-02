@@ -1,13 +1,59 @@
 [project]
 name = "skillet"
-description = "MCP-native skill registry for AI agents"
+description = "MCP-native skill discovery for AI agents"
 license = "MIT OR Apache-2.0"
 categories = ["tools", "skills"]
-tags = ["mcp", "skills", "ai-agents", "registry"]
+tags = ["mcp", "skills", "ai-agents"]
 
 [[project.authors]]
 name = "Josh Rotenberg"
 github = "joshrotenberg"
 
 [skills]
-path = "registry"
+path = "skills"
+
+# Suggested repos for decentralized skill discovery.
+# Skillet follows these on startup to build a discovery graph.
+# Any repo can suggest others; use --no-suggest to opt out.
+
+[[suggest]]
+url = "https://github.com/anthropics/courses.git"
+subdir = "skills"
+description = "Anthropic courses and Claude skills"
+
+[[suggest]]
+url = "https://github.com/anthropics/prompt-eng-interactive-tutorial.git"
+subdir = "skills"
+description = "Anthropic prompt engineering tutorial skills"
+
+[[suggest]]
+url = "https://github.com/vercel-labs/ai-sdk-agents-skills.git"
+description = "Vercel AI SDK agent skills"
+
+[[suggest]]
+url = "https://github.com/firebase/skills.git"
+description = "Firebase agent skills"
+
+[[suggest]]
+url = "https://github.com/supabase-community/supabase-agent-skills.git"
+description = "Supabase agent skills"
+
+[[suggest]]
+url = "https://github.com/google-gemini/agent-skills.git"
+description = "Google Gemini agent skills"
+
+[[suggest]]
+url = "https://github.com/redis/agent-skills.git"
+description = "Redis agent skills"
+
+[[suggest]]
+url = "https://github.com/callstackincubator/agent-skills.git"
+description = "Callstack agent skills for React Native"
+
+[[suggest]]
+url = "https://github.com/softaworks/agent-skills.git"
+description = "Softaworks agent skills"
+
+[[suggest]]
+url = "https://github.com/daymade/agent-skills.git"
+description = "Daymade agent skills"

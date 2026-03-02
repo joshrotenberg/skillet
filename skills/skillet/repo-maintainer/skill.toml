@@ -1,9 +1,9 @@
 [skill]
-name = "registry-maintainer"
+name = "repo-maintainer"
 owner = "skillet"
 version = "2026.02.27"
-description = "Creating and maintaining skill registries: setup, layout, review, and hosting"
-trigger = "Use when the user wants to create a skill registry, review skill PRs, or configure registry hosting"
+description = "Creating and maintaining skill repos: setup, layout, review, and hosting"
+trigger = "Use when the user wants to create a skill repo, review skill PRs, or configure repo hosting"
 license = "MIT OR Apache-2.0"
 
 [skill.author]
@@ -12,7 +12,7 @@ github = "joshrotenberg"
 
 [skill.classification]
 categories = ["tools", "configuration"]
-tags = ["skillet", "registry", "maintenance", "hosting", "review"]
+tags = ["skillet", "repo", "maintenance", "hosting", "review"]
 
 [skill.compatibility]
 requires_tool_use = true

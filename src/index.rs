@@ -340,7 +340,7 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
         validate::validate_skillpack_lenient(dir, None)?
     };
 
-    // Registry-specific: owner/name must match directory structure
+    // Repo-specific: owner/name must match directory structure
     // For lenient mode, the inferred name comes from the directory so it
     // will always match; only check when skill.toml exists (strict mode).
     if has_skill_toml {

@@ -10,25 +10,24 @@
 
 # skillet
 
-A skill repo toolkit for AI agents.
+MCP-native skill discovery for AI agents.
 
 ## What is skillet
 
-AI agent skills -- structured prompts that guide agent behavior -- are
-scattered across GitHub repos, npm packages, and copy-paste threads.
-There's no standard way to discover, distribute, or manage them.
+Skillet serves agent skills over MCP. Your agent connects, searches
+for skills relevant to the current task, reads them, and uses them
+immediately -- no installation, no restart. It also works as a CLI
+for browsing, installing, and managing skills across agents.
 
-Skillet fixes this. Search, install, and manage skills from the CLI, or
-serve repos to agents over MCP so they can discover skills at
-runtime. Skills follow the
+Skills are just SKILL.md files in git repos. Anyone can create a
+skill repo and share it. Skillet indexes them, runs full-text
+search, and delivers them to agents at runtime. Think of it like
+git: skillet is the tool, repos are distributed.
+
+Skills follow the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills)
 and work with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, and
 any compatible agent.
-
-Think of it like git: skillet is the tool, repos are distributed.
-Anyone can create a skill repo (a git repo with SKILL.md files) and
-share it. The same binary is always both client and server -- the CLI
-commands and the MCP server share the same index and search engine.
 
 ## Install
 
@@ -91,7 +90,7 @@ Or with Docker (zero install):
 ```
 
 That's it. Skillet auto-discovers the
-[official repo](https://github.com/joshrotenberg/skillet/tree/main/registry)
+[official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
 and any skills already installed on your machine. Your agent now has
 access to `search_skills`, `install_skill`, and the full
 [MCP interface](#mcp-interface).
@@ -225,6 +224,22 @@ skillet search rust \
 
 # Or configure defaults in ~/.config/skillet/config.toml
 ```
+
+### Decentralized discovery
+
+Repos can suggest other repos via `[[suggest]]` entries in their
+`skillet.toml`. Skillet follows these on startup to build a discovery
+graph -- no central authority needed. The official repo suggests known
+community repos so you get broad coverage out of the box.
+
+```toml
+# In any repo's skillet.toml
+[[suggest]]
+url = "https://github.com/acme/agent-skills.git"
+description = "Acme team skills"
+```
+
+Opt out with `--no-suggest` or set `follow_suggestions = false` in config.
 
 ### Project manifest (skillet.toml)
 
@@ -445,6 +460,7 @@ fetch content via resource templates.
 | `--read-only` | Don't expose the install_skill tool |
 | `--tools <list>` | Explicit tool allowlist (comma-separated) |
 | `--resources <list>` | Explicit resource allowlist (comma-separated) |
+| `--no-suggest` | Don't follow `[[suggest]]` entries from repos |
 
 **HTTP transport note**: `--http` disables origin validation to allow
 connections from any origin. It is intended for local development and
@@ -464,6 +480,8 @@ global = false          # install globally vs project-local
 [repos]
 remote = ["https://github.com/joshrotenberg/skillet.git"]
 local = []
+follow_suggestions = true  # follow [[suggest]] entries from repos
+suggest_depth = 1           # max recursion depth for suggestions
 
 [cache]
 enabled = true
@@ -535,7 +553,7 @@ works standalone.
 
 v0.2.0. The skill format is stable, both the CLI and MCP interface are
 functional, and there's an
-[official repo](https://github.com/joshrotenberg/skillet/tree/main/registry)
+[official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
 with skills across development, devops, and security categories.
 `skillet.toml` provides a unified project manifest for embedding skills
 in any repository with zero-config discovery.

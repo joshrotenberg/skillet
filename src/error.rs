@@ -92,7 +92,7 @@ pub enum Error {
     #[error("git {operation} failed: {stderr}")]
     Git { operation: String, stderr: String },
 
-    // -- Registry --
+    // -- Repo --
     #[error("invalid duration: {0}")]
     InvalidDuration(String),
 

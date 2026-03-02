@@ -1,11 +1,11 @@
 ---
 name: user
-description: Using skillet as a skill consumer. Covers searching, installing, and managing skills from registries.
+description: Using skillet as a skill consumer. Covers searching, installing, and managing skills from repos.
 ---
 
 ## Skillet User Guide
 
-Skillet is an MCP-native skill registry toolkit. This skill covers using
+Skillet is an MCP-native skill discovery toolkit. This skill covers using
 skillet as a consumer: finding, installing, and managing skills.
 
 ### Adding Skillet
@@ -89,7 +89,7 @@ Target directories:
 ```bash
 skillet list                    # show all installed skills
 skillet audit                   # verify integrity of installed skills
-skillet trust list              # show trusted registries and pinned skills
+skillet trust list              # show trusted repos and pinned skills
 skillet trust pin owner/name    # pin a skill's content hash
 ```
 
@@ -100,11 +100,11 @@ Run `skillet setup` to generate `~/.config/skillet/config.toml`:
 ```bash
 skillet setup                          # default setup
 skillet setup --target claude          # set default install target
-skillet setup --remote <url>           # add a custom registry
-skillet setup --no-official-registry   # skip the official registry
+skillet setup --remote <url>           # add a custom repo
+skillet setup --no-official-registry   # skip the official repo
 ```
 
-The config file controls default install targets, registries, cache settings,
+The config file controls default install targets, repos, cache settings,
 and trust configuration.
 
 ### User Preferences

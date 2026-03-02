@@ -28,7 +28,7 @@ src/
   integrity.rs   # SHA256 content hashing, MANIFEST.sha256 verification
   manifest.rs    # Manifest generation
   project.rs     # skillet.toml unified manifest types and loading
-  registry.rs    # Registry abstraction, init, load, merge
+  repo.rs        # Repo management: init, load, merge
   safety.rs      # Pattern-based static analysis for dangerous content
   scaffold.rs    # init-skill, init-registry, init-project scaffolding
   validate.rs    # Skillpack validation
@@ -43,13 +43,13 @@ src/
 
 **Key types**:
 
-- `AppState` -- holds `RwLock<SkillIndex>`, `RwLock<SkillSearch>`, registry paths, config
-- `SkillIndex` -- maps `(owner, name)` to `SkillEntry` with `merge()` for multi-registry
+- `AppState` -- holds `RwLock<SkillIndex>`, `RwLock<SkillSearch>`, repo paths, config
+- `SkillIndex` -- maps `(owner, name)` to `SkillEntry` with `merge()` for multi-repo
 - `SkillSearch` -- wraps BM25 index, rebuilt on refresh
 - `SkillSource` -- three variants: `Registry`, `Local`, `Embedded`
 
-**Data flow**: registries (local/remote) are loaded into `SkillIndex`, merged
-first-registry-wins, then `SkillSearch` is built from the merged index.
+**Data flow**: repos (local/remote) are loaded into `SkillIndex`, merged
+first-match-wins, then `SkillSearch` is built from the merged index.
 MCP tools query the search index; resources read from the index directly.
 
 ### Development Setup
@@ -85,7 +85,7 @@ cargo test --test http --all-features
 cargo test --test '*' --all-features
 ```
 
-Test fixtures live in `test-registry/` and `test-npm-registry/`.
+Test fixtures are dynamically generated via `testutil.rs`.
 
 ### Pre-commit Checklist
 
@@ -113,8 +113,8 @@ Branch naming conventions:
 
 ### Design Principles
 
-- **Tool-first**: skillet is the tool, registries are data
+- **Tool-first**: skillet is the tool, repos are data
 - **Zero-config-first**: only SKILL.md is truly required
 - **Owner/name namespacing**: `owner/skill-name` directories
 - **Separate metadata from prompt**: skill.toml + SKILL.md
-- **Git-backed**: registries are git repos, auditable by default
+- **Git-backed**: repos are git repos, auditable by default

@@ -12,7 +12,7 @@ github = "joshrotenberg"
 
 [skill.classification]
 categories = ["tools", "skills"]
-tags = ["skillet", "registry", "skills", "discovery", "agent-skills"]
+tags = ["skillet", "skills", "discovery", "agent-skills"]
 
 [skill.compatibility]
 requires_tool_use = true

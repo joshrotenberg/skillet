@@ -70,6 +70,7 @@ pub(crate) fn run_trust_pin(args: TrustPinArgs) -> ExitCode {
         &args.repos.remote,
         &cli_config,
         args.repos.subdir.as_deref(),
+        args.repos.no_suggest,
     ) {
         Ok(r) => r,
         Err(e) => {
