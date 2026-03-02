@@ -40,7 +40,7 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// Run the MCP server (default when no subcommand is given)
+    /// Run the MCP server (default when stdin is not a terminal)
     Serve(ServeArgs),
     /// Validate a skillpack directory
     Validate(ValidateArgs),
