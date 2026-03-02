@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-02
+
+### Bug Fixes
+
+- Scope uninstall to current project directory ([#173](https://github.com/joshrotenberg/skillet/pull/173))
+
+### Refactor
+
+- Design v2 -- remove publishing, simplify trust, rename registry to repo ([#171](https://github.com/joshrotenberg/skillet/pull/171))
+
+
+
 ## [0.3.0] - 2026-02-28
 
 ### Bug Fixes
