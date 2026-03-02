@@ -195,6 +195,10 @@ struct InstallArgs {
     #[arg(long)]
     require_trusted: bool,
 
+    /// Show detailed trust information during install
+    #[arg(long, short)]
+    verbose: bool,
+
     #[command(flatten)]
     repos: RepoArgs,
 }

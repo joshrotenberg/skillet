@@ -175,14 +175,22 @@ pub(crate) fn run_install(args: InstallArgs) -> ExitCode {
                     }
                 }
                 _ => {
-                    // "warn" (default) -- explicit guidance
-                    eprintln!(
-                        "Warning: {reason}\n\
-                         To verify before installing:\n\
-                         \n  skillet info {owner}/{name}\n\
-                         \n  skillet trust pin {owner}/{name}\n",
-                        reason = trust_check.reason,
-                    );
+                    // "warn" (default) -- brief tip, detailed guidance with --verbose
+                    if args.verbose {
+                        eprintln!(
+                            "Warning: {reason}\n\
+                             To verify before installing:\n\
+                             \n  skillet info {owner}/{name}\n\
+                             \n  skillet trust pin {owner}/{name}\n",
+                            reason = trust_check.reason,
+                        );
+                    } else {
+                        eprintln!(
+                            "Tip: {owner}/{name} is not yet pinned. \
+                             It will be auto-pinned after install.\n  \
+                             Run `skillet trust --help` to learn more.",
+                        );
+                    }
                 }
             }
         }
