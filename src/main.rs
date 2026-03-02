@@ -247,9 +247,9 @@ struct InfoArgs {
 
 #[derive(clap::Args, Debug)]
 struct ListArgs {
-    /// List installed skills (default behavior)
-    #[arg(long, default_value_t = true)]
-    installed: bool,
+    /// Show all installations, including those outside the current project
+    #[arg(long)]
+    all: bool,
 }
 
 #[derive(clap::Args, Debug)]
