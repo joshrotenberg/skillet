@@ -706,7 +706,7 @@ fn version_flag() {
 #[test]
 fn help_flag() {
     skillet().args(["--help"]).assert().success().stdout(
-        predicate::str::contains("MCP-native skill registry")
+        predicate::str::contains("MCP-native skill discovery")
             .and(predicate::str::contains("Commands:"))
             .and(predicate::str::contains("search"))
             .and(predicate::str::contains("install")),

@@ -1,6 +1,6 @@
 # Skillet
 
-A skill registry toolkit for AI agents. CLI and MCP server.
+A skill discovery toolkit for AI agents. CLI and MCP server.
 
 Repo name is `grimoire`, crate/binary name is `skillet`.
 
@@ -31,13 +31,13 @@ Key modules:
 - `safety.rs` -- pattern-based static analysis for dangerous skill content
 - `trust.rs` -- trust tiers and content hash pinning
 - `install.rs` -- write skills to agent platform directories
-- `registry.rs` -- multi-registry loading, clone/pull, cache coordination
+- `repo.rs` -- multi-repo loading, clone/pull, cache coordination
 - `tools/` -- MCP tools: `search_skills`, `list_categories`, `list_skills_by_owner`, `install_skill`, `info_skill`
 - `resources/` -- MCP resources: `skill_content`, `skill_metadata`, `skill_files`
 
 Key patterns:
 - `AppState` holds `RwLock<SkillIndex>` and `RwLock<SkillSearch>`, both rebuilt on refresh
-- `SkillIndex` maps `(owner, name)` to `SkillEntry`, with `merge()` for multi-registry (first registry wins)
+- `SkillIndex` maps `(owner, name)` to `SkillEntry`, with `merge()` for multi-repo (first match wins)
 - MCP tools/resources are capability-gated via `ServerCapabilities`
 - All MCP tools follow the same pattern: `build(state) -> Tool` using `ToolBuilder` from `tower-mcp`
 
@@ -54,7 +54,7 @@ Key patterns:
 
 - Unit tests live in each module as `#[cfg(test)] mod tests`
 - Binary integration tests in `src/main.rs` use `tower-mcp`'s test harness
-- Test registry fixtures in `test-registry/` -- real skill.toml/SKILL.md files
+- Test fixtures are dynamically generated via `testutil.rs`
 - `tempfile` crate for temporary directories in tests
 - No mocking framework; tests use real data structures
 
@@ -73,7 +73,7 @@ owner/skill-name/
 
 ## CLI subcommands
 
-- `skillet search <query>` -- search registries
+- `skillet search <query>` -- search repos
 - `skillet info <owner/name>` -- show skill detail
 - `skillet install <owner/name>` -- install to agent directory
 - `skillet list` -- list installed skills
@@ -81,5 +81,5 @@ owner/skill-name/
 - `skillet validate <path>` -- validate a skillpack
 - `skillet pack <path>` -- validate + manifest + version history
 - `skillet publish <path> --repo <owner/repo>` -- pack + open PR
-- `skillet init-registry <path>` -- scaffold a registry
+- `skillet init-registry <path>` -- scaffold a repo
 - `skillet [serve]` -- run MCP server (default subcommand)

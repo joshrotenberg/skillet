@@ -3,11 +3,11 @@ name = "skillet-mcp"
 version = "0.4.0"
 edition = "2024"
 rust-version = "1.90"
-description = "MCP-native skill registry for AI agents"
+description = "MCP-native skill discovery for AI agents"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/joshrotenberg/skillet"
 repository = "https://github.com/joshrotenberg/skillet"
-keywords = ["mcp", "skills", "ai-agents", "registry"]
+keywords = ["mcp", "skills", "ai-agents"]
 categories = ["development-tools", "command-line-utilities"]
 
 [lib]

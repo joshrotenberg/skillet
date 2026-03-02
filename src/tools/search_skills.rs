@@ -29,7 +29,7 @@ pub struct SearchSkillsInput {
 pub fn build(state: Arc<AppState>) -> Tool {
     ToolBuilder::new("search_skills")
         .description(
-            "Search the skill registry. Returns skills matching the query, \
+            "Search for skills. Returns skills matching the query, \
              with optional filters for category, tag, or model compatibility. \
              Use this to discover skills relevant to your current task.",
         )

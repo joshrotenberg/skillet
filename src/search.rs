@@ -1,6 +1,6 @@
 //! Skill search wrapper over the BM25 index.
 //!
-//! Builds a BM25 index from the skill registry and provides relevance-ranked
+//! Builds a BM25 index from the skill index and provides relevance-ranked
 //! search over skill metadata fields.
 
 use std::collections::HashMap;

@@ -1,22 +1,22 @@
 ---
-name: registry-maintainer
-description: Creating and maintaining skill registries. Covers setup, directory layout, PR review, multi-registry, and hosting.
+name: repo-maintainer
+description: Creating and maintaining skill repos. Covers setup, directory layout, PR review, multi-repo, and hosting.
 ---
 
-## Registry Maintainer Guide
+## Repo Maintainer Guide
 
-A skill registry is a git repo with a flat directory structure of skillpacks.
-Anyone can create one. Skillet is the tool, registries are data.
+A skill repo is a git repo with a flat directory structure of skillpacks.
+Anyone can create one. Skillet is the tool, repos are data.
 
-### Creating a Registry
+### Creating a Repo
 
 ```bash
-skillet init-registry path/to/my-registry
-skillet init-registry path/to/my-registry --name "My Registry" --description "Team skills"
+skillet init-registry path/to/my-repo
+skillet init-registry path/to/my-repo --name "My Repo" --description "Team skills"
 ```
 
 This creates a git repo with:
-- `skillet.toml` -- registry metadata
+- `skillet.toml` -- repo metadata
 - `README.md` -- instructions for contributors
 - `.gitignore`
 - An initial commit
@@ -24,8 +24,8 @@ This creates a git repo with:
 ### Directory Layout
 
 ```
-my-registry/
-  skillet.toml          # registry config
+my-repo/
+  skillet.toml          # repo config
   owner1/skill-a/       # flat: owner/name
     skill.toml
     SKILL.md
@@ -41,13 +41,13 @@ Nested paths are also supported (e.g. `acme/lang/java/maven-build/`).
 The skill's `owner` and `name` fields in `skill.toml` are authoritative;
 the directory path is for organization.
 
-### Registry Configuration
+### Repo Configuration
 
 **skillet.toml** (preferred):
 
 ```toml
 [registry]
-name = "my-registry"
+name = "my-repo"
 version = 1
 description = "Team skills for our org"
 
@@ -56,7 +56,7 @@ name = "Jane Doe"
 github = "janedoe"
 email = "jane@example.com"
 
-[[registry.suggests]]
+[[suggest]]
 url = "https://github.com/joshrotenberg/skillet.git"
 description = "Official community skills"
 
@@ -80,21 +80,21 @@ Skillet can read skills from npm-style repos where skills live under a
 `skills/` subdirectory. Use `--subdir skills` when serving:
 
 ```bash
-skillet --registry path/to/npm-repo --subdir skills
+skillet --repo path/to/npm-repo --subdir skills
 ```
 
-### Multi-Registry
+### Multi-Repo
 
-Users can aggregate multiple registries. First-match-wins on name collision:
+Users can aggregate multiple repos. First-match-wins on name collision:
 
 ```bash
-skillet search "*" --registry ./primary --registry ./secondary
-skillet --registry ./primary --remote https://github.com/org/skills.git
+skillet search "*" --repo ./primary --repo ./secondary
+skillet --repo ./primary --remote https://github.com/org/skills.git
 ```
 
 ### Hosting
 
-Registries are git repos. Host anywhere git is accessible:
+Skill repos are git repos. Host anywhere git is accessible:
 - GitHub / GitLab / Bitbucket (public or private)
 - Self-hosted git servers
 - Any URL that `git clone` can reach

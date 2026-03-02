@@ -25,6 +25,7 @@ pub(crate) fn run_search(args: SearchArgs) -> ExitCode {
         &args.repos.remote,
         &cli_config,
         args.repos.subdir.as_deref(),
+        args.repos.no_suggest,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -122,6 +123,7 @@ pub(crate) fn run_categories(args: CategoriesArgs) -> ExitCode {
         &args.repos.remote,
         &cli_config,
         args.repos.subdir.as_deref(),
+        args.repos.no_suggest,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -180,6 +182,7 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         &args.repos.remote,
         &cli_config,
         args.repos.subdir.as_deref(),
+        args.repos.no_suggest,
     ) {
         Ok(r) => r,
         Err(e) => {
@@ -297,7 +300,7 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         println!("  versions .............. {}", available.join(", "));
     }
 
-    // Registry path for nested skills
+    // Repo path for nested skills
     if let Some(ref rpath) = entry.repo_path {
         println!("  repo path ......... {rpath}");
     }

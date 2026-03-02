@@ -125,11 +125,36 @@ impl Default for InstallConfig {
 }
 
 /// `[repos]` section: default local and remote repos.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ReposConfig {
     pub local: Vec<PathBuf>,
     pub remote: Vec<String>,
+    /// Whether to follow `[[suggest]]` entries from loaded repos (default: true).
+    #[serde(default = "default_true")]
+    pub follow_suggestions: bool,
+    /// Maximum depth for following suggestion links (default: 1).
+    #[serde(default = "default_suggest_depth")]
+    pub suggest_depth: u32,
+}
+
+impl Default for ReposConfig {
+    fn default() -> Self {
+        Self {
+            local: Vec::new(),
+            remote: Vec::new(),
+            follow_suggestions: true,
+            suggest_depth: 1,
+        }
+    }
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_suggest_depth() -> u32 {
+    1
 }
 
 /// An agent platform to install skills into.
@@ -304,6 +329,7 @@ pub fn generate_default_config(
         repos: ReposConfig {
             local,
             remote: remotes,
+            ..Default::default()
         },
         ..Default::default()
     })
@@ -579,6 +605,32 @@ targets = ["gemini"]
         assert_eq!(&ts[4..5], "-");
         assert_eq!(&ts[7..8], "-");
         assert_eq!(&ts[10..11], "T");
+    }
+
+    #[test]
+    fn test_repos_config_suggestion_defaults() {
+        let config = ReposConfig::default();
+        assert!(config.follow_suggestions);
+        assert_eq!(config.suggest_depth, 1);
+    }
+
+    #[test]
+    fn test_repos_config_suggestion_from_toml() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        std::fs::write(
+            &path,
+            r#"
+[repos]
+follow_suggestions = false
+suggest_depth = 3
+"#,
+        )
+        .unwrap();
+
+        let config = load_config_from(&path).unwrap();
+        assert!(!config.repos.follow_suggestions);
+        assert_eq!(config.repos.suggest_depth, 3);
     }
 
     #[test]

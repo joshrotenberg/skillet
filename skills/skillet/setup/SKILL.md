@@ -1,11 +1,11 @@
 ---
 name: setup
-description: Set up and configure the Skillet skill registry. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
+description: Set up and configure Skillet skill discovery. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
 ---
 
 ## Skillet Setup
 
-Skillet is an MCP-native skill registry. It gives you access to a
+Skillet is an MCP-native skill discovery tool. It gives you access to a
 searchable library of agent skills at runtime -- no installation required.
 
 ### Adding Skillet to Your Project
@@ -41,7 +41,7 @@ After adding, restart your agent to connect.
 
 ### Using Skills
 
-Once connected, you have three ways to use skills from the registry:
+Once connected, you have three ways to use skills:
 
 **Inline (recommended for most cases)**:
 Search for a skill, read it via the resource template, and follow its
@@ -98,6 +98,6 @@ Run `skillet setup` to generate `~/.config/skillet/config.toml`:
 ```bash
 skillet setup                          # default setup
 skillet setup --target claude          # set default install target
-skillet setup --remote <url>           # add a custom registry
-skillet setup --no-official-registry   # skip the official registry
+skillet setup --remote <url>           # add a custom repo
+skillet setup --no-official-registry   # skip the official repo
 ```

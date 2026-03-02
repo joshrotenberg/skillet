@@ -28,6 +28,26 @@ pub struct SkilletToml {
     /// Multiple skills in a subdirectory
     #[serde(default)]
     pub skills: Option<SkillsSection>,
+
+    /// Suggested repos for decentralized discovery
+    #[serde(default)]
+    pub suggest: Vec<SuggestEntry>,
+}
+
+/// A suggested repo that this repo recommends following.
+///
+/// Any repo's `skillet.toml` can include `[[suggest]]` entries pointing to
+/// other repos. Skillet follows these on startup to build a discovery graph.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct SuggestEntry {
+    /// Git URL of the suggested repo
+    pub url: String,
+    /// Subdirectory within the repo containing skills
+    #[serde(default)]
+    pub subdir: Option<String>,
+    /// Human-readable description of what this repo contains
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// Project metadata section.
@@ -1216,6 +1236,77 @@ path = ".skillet"
                 .skills
                 .contains_key(&("dev".to_string(), "extra".to_string()))
         );
+    }
+
+    #[test]
+    fn test_parse_suggest_entries() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("skillet.toml"),
+            r#"
+[project]
+name = "test-repo"
+
+[skills]
+path = "skills"
+
+[[suggest]]
+url = "https://github.com/owner/repo-a.git"
+subdir = "skills"
+description = "Repo A skills"
+
+[[suggest]]
+url = "https://github.com/owner/repo-b.git"
+description = "Repo B skills"
+
+[[suggest]]
+url = "https://github.com/owner/repo-c.git"
+"#,
+        )
+        .unwrap();
+
+        let manifest = load_skillet_toml(tmp.path()).unwrap().unwrap();
+        assert_eq!(manifest.suggest.len(), 3);
+
+        assert_eq!(
+            manifest.suggest[0].url,
+            "https://github.com/owner/repo-a.git"
+        );
+        assert_eq!(manifest.suggest[0].subdir.as_deref(), Some("skills"));
+        assert_eq!(
+            manifest.suggest[0].description.as_deref(),
+            Some("Repo A skills")
+        );
+
+        assert_eq!(
+            manifest.suggest[1].url,
+            "https://github.com/owner/repo-b.git"
+        );
+        assert!(manifest.suggest[1].subdir.is_none());
+        assert_eq!(
+            manifest.suggest[1].description.as_deref(),
+            Some("Repo B skills")
+        );
+
+        assert_eq!(
+            manifest.suggest[2].url,
+            "https://github.com/owner/repo-c.git"
+        );
+        assert!(manifest.suggest[2].subdir.is_none());
+        assert!(manifest.suggest[2].description.is_none());
+    }
+
+    #[test]
+    fn test_suggest_defaults_empty() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(
+            tmp.path().join("skillet.toml"),
+            "[project]\nname = \"no-suggest\"\n",
+        )
+        .unwrap();
+
+        let manifest = load_skillet_toml(tmp.path()).unwrap().unwrap();
+        assert!(manifest.suggest.is_empty());
     }
 
     // ── Frontmatter parsing tests ────────────────────────────────────

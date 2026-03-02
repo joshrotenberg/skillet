@@ -207,7 +207,7 @@ fn write_extra(skill_dir: &Path, rel_path: &str, content: &str) {
 
 const STANDARD_SKILLET_TOML: &str = r#"[project]
 name = "skillet"
-description = "Test registry for skillet development"
+description = "Test repo for skillet development"
 
 [[project.authors]]
 name = "Josh Rotenberg"
@@ -588,7 +588,7 @@ name = "skillet-dev"
 owner = "joshrotenberg"
 version = "2026.02.24"
 description = "Skillet codebase conventions, architecture, and contribution workflow"
-trigger = "Use when working on the skillet codebase (the MCP skill registry itself)"
+trigger = "Use when working on the skillet codebase (the MCP skill discovery tool itself)"
 license = "MIT"
 
 [skill.author]
@@ -597,7 +597,7 @@ github = "joshrotenberg"
 
 [skill.classification]
 categories = ["development", "rust"]
-tags = ["skillet", "mcp", "tower-mcp", "registry", "skills"]
+tags = ["skillet", "mcp", "tower-mcp", "skills"]
 
 [skill.compatibility]
 requires_tool_use = true
@@ -615,7 +615,7 @@ description: Skillet codebase conventions, architecture, and contribution workfl
 
 ## What is Skillet
 
-Skillet is an MCP-native skill registry for AI agents. Three-layer architecture:
+Skillet is an MCP-native skill discovery tool for AI agents. Three-layer architecture:
 discovery index, content storage, MCP server.
 
 ## Key Patterns
@@ -1304,7 +1304,7 @@ const SETUP_SKILL_TOML: &str = r#"[skill]
 name = "setup"
 owner = "skillet"
 version = "2026.02.24"
-description = "Set up and configure the Skillet skill registry"
+description = "Set up and configure the Skillet skill discovery tool"
 trigger = "Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences"
 license = "MIT"
 
@@ -1314,7 +1314,7 @@ github = "skillet"
 
 [skill.classification]
 categories = ["tools", "configuration"]
-tags = ["skillet", "skills", "setup", "mcp", "registry"]
+tags = ["skillet", "skills", "setup", "mcp"]
 
 [skill.compatibility]
 requires_tool_use = true
@@ -1327,17 +1327,17 @@ verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
 
 const SETUP_SKILL_MD: &str = r#"---
 name: setup
-description: Set up and configure the Skillet skill registry. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
+description: Set up and configure the Skillet skill discovery tool. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
 ---
 
 ## Skillet Setup
 
-Skillet is an MCP-native skill registry. It gives you access to a
+Skillet is an MCP-native skill discovery tool. It gives you access to a
 searchable library of agent skills at runtime -- no installation required.
 
 ### Using Skills
 
-Once connected, you have three ways to use skills from the registry:
+Once connected, you have three ways to use skills:
 
 **Inline (recommended for most cases)**:
 Search for a skill, read it via the resource template, and follow its

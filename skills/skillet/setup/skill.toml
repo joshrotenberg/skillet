@@ -2,7 +2,7 @@
 name = "setup"
 owner = "skillet"
 version = "2026.02.27"
-description = "Set up and configure the Skillet skill registry"
+description = "Set up and configure Skillet skill discovery"
 trigger = "Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences"
 license = "MIT OR Apache-2.0"
 
@@ -12,7 +12,7 @@ github = "joshrotenberg"
 
 [skill.classification]
 categories = ["tools", "configuration"]
-tags = ["skillet", "skills", "setup", "mcp", "registry"]
+tags = ["skillet", "skills", "setup", "mcp"]
 
 [skill.compatibility]
 requires_tool_use = true

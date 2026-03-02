@@ -27,7 +27,7 @@ use skillet_mcp::{discover, git, index, repo, search, state};
 #[derive(Parser, Debug)]
 #[command(name = "skillet")]
 #[command(version)]
-#[command(about = "MCP-native skill registry for AI agents")]
+#[command(about = "MCP-native skill discovery for AI agents")]
 #[command(args_conflicts_with_subcommands = true)]
 struct Cli {
     #[command(subcommand)]
@@ -119,6 +119,10 @@ struct ServeArgs {
     /// Explicit resource allowlist (comma-separated: skills,metadata,files)
     #[arg(long, value_delimiter = ',')]
     resources: Vec<String>,
+
+    /// Don't follow [[suggest]] entries from loaded repos
+    #[arg(long)]
+    no_suggest: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -172,6 +176,10 @@ struct RepoArgs {
     /// Bypass the disk cache and rebuild the index from scratch
     #[arg(long)]
     no_cache: bool,
+
+    /// Don't follow [[suggest]] entries from loaded repos
+    #[arg(long)]
+    no_suggest: bool,
 }
 
 #[derive(clap::Args, Debug)]
@@ -367,7 +375,7 @@ async fn main() -> ExitCode {
         Some(Command::Setup(args)) => cli::setup::run_setup(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None if interactive_tty => {
-            eprintln!("Skillet - skill registry for AI agents\n");
+            eprintln!("Skillet - skill discovery for AI agents\n");
             eprintln!("Get started:");
             eprintln!("  skillet search \"*\"          # browse all skills");
             eprintln!("  skillet install owner/name  # install a skill");
@@ -503,7 +511,7 @@ fn build_router(state: Arc<AppState>, caps: &ServerCapabilities) -> McpRouter {
 /// Generate MCP instructions text listing only exposed tools and resources.
 fn build_instructions(caps: &ServerCapabilities) -> String {
     let mut text = String::from(
-        "Skillet is a skill registry for AI agents. Use it to discover and \
+        "Skillet is a skill discovery tool for AI agents. Use it to discover and \
          fetch skills relevant to your current task.\n\n",
     );
 
@@ -706,6 +714,29 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
         }
         let idx = index::load_index(path)?;
         merged_index.merge(idx);
+    }
+
+    // Follow [[suggest]] entries from loaded repos
+    if !args.no_suggest && cli_config.repos.follow_suggestions {
+        let suggest_depth = cli_config.repos.suggest_depth;
+        let cache_enabled = cli_config.cache.enabled;
+        let cache_ttl = if cache_enabled {
+            repo::parse_duration(&cli_config.cache.ttl).unwrap_or(Duration::from_secs(300))
+        } else {
+            Duration::ZERO
+        };
+        let visited: std::collections::HashSet<String> = args.remote.iter().cloned().collect();
+        let seed_paths = repo_paths.clone();
+        repo::follow_suggestions_serve(
+            &seed_paths,
+            &cache_base,
+            cache_enabled,
+            cache_ttl,
+            &mut merged_index,
+            &mut repo_paths,
+            visited,
+            suggest_depth,
+        );
     }
 
     // Auto-discover locally installed skills
@@ -1372,6 +1403,7 @@ mod tests {
             no_install: false,
             tools: Vec::new(),
             resources: Vec::new(),
+            no_suggest: false,
         }
     }
 
