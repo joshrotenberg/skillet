@@ -10,25 +10,24 @@
 
 # skillet
 
-A skill repo toolkit for AI agents.
+MCP-native skill discovery for AI agents.
 
 ## What is skillet
 
-AI agent skills -- structured prompts that guide agent behavior -- are
-scattered across GitHub repos, npm packages, and copy-paste threads.
-There's no standard way to discover, distribute, or manage them.
+Skillet serves agent skills over MCP. Your agent connects, searches
+for skills relevant to the current task, reads them, and uses them
+immediately -- no installation, no restart. It also works as a CLI
+for browsing, installing, and managing skills across agents.
 
-Skillet fixes this. Search, install, and manage skills from the CLI, or
-serve repos to agents over MCP so they can discover skills at
-runtime. Skills follow the
+Skills are just SKILL.md files in git repos. Anyone can create a
+skill repo and share it. Skillet indexes them, runs full-text
+search, and delivers them to agents at runtime. Think of it like
+git: skillet is the tool, repos are distributed.
+
+Skills follow the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills)
 and work with Claude Code, Cursor, Copilot, Windsurf, Gemini CLI, and
 any compatible agent.
-
-Think of it like git: skillet is the tool, repos are distributed.
-Anyone can create a skill repo (a git repo with SKILL.md files) and
-share it. The same binary is always both client and server -- the CLI
-commands and the MCP server share the same index and search engine.
 
 ## Install
 
