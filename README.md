@@ -420,7 +420,7 @@ fetch content via resource templates.
 | `skillet repo add <url_or_path>` | Add a remote or local repo to config |
 | `skillet repo remove <url_or_path>` | Remove a repo from config |
 | `skillet repo list` | List configured repos |
-| `skillet [serve]` | Run the MCP server (default when no subcommand) |
+| `skillet [serve]` | Run the MCP server (default when stdin is not a terminal) |
 
 ### Trust and audit
 
