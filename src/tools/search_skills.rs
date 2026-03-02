@@ -98,7 +98,9 @@ pub fn build(state: Arc<AppState>) -> Tool {
 
                 if results.is_empty() {
                     return Ok(CallToolResult::text(format!(
-                        "No skills found matching '{}'.",
+                        "No skills found matching '{}'.\n\n\
+                         Tip: use `info_skill` with `owner: \"skillet\"`, `name: \"skill-repos\"` \
+                         to see external repositories that may have relevant skills.",
                         input.query
                     )));
                 }
