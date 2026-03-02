@@ -1,3 +1,4 @@
+use std::path::PathBuf;
 use std::process::ExitCode;
 
 use skillet_mcp::{config, manifest, repo, search, state};
@@ -305,7 +306,7 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
 }
 
 /// Run the `list` subcommand.
-pub(crate) fn run_list(_args: ListArgs) -> ExitCode {
+pub(crate) fn run_list(args: ListArgs) -> ExitCode {
     let installed_manifest = match manifest::load() {
         Ok(m) => m,
         Err(e) => {
@@ -314,15 +315,31 @@ pub(crate) fn run_list(_args: ListArgs) -> ExitCode {
         }
     };
 
-    if installed_manifest.skills.is_empty() {
-        println!("No skills installed.");
+    let cwd = std::env::current_dir().unwrap_or_default();
+    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
+
+    let skills: Vec<&manifest::InstalledSkill> = installed_manifest
+        .skills
+        .iter()
+        .filter(|s| {
+            args.all || s.installed_to.starts_with(&home) || s.installed_to.starts_with(&cwd)
+        })
+        .collect();
+
+    if skills.is_empty() {
+        if installed_manifest.skills.is_empty() {
+            println!("No skills installed.");
+        } else {
+            println!("No skills installed in this scope.");
+            println!("Use --all to see all installations.");
+        }
         return ExitCode::SUCCESS;
     }
 
     // Group by (owner, name)
     let mut groups: std::collections::BTreeMap<(String, String), Vec<&manifest::InstalledSkill>> =
         std::collections::BTreeMap::new();
-    for skill in &installed_manifest.skills {
+    for skill in &skills {
         groups
             .entry((skill.owner.clone(), skill.name.clone()))
             .or_default()

@@ -577,6 +577,63 @@ fn repo_list_empty() {
         .stdout(predicate::str::contains("No repos configured"));
 }
 
+// ── List scoping (#164) ──────────────────────────────────────
+
+#[test]
+fn list_scoped_hides_other_projects() {
+    let tmp = tempfile::tempdir().expect("create temp dir");
+    let home = tmp.path().join("home");
+    let project_a = tmp.path().join("project-a");
+    let project_b = tmp.path().join("project-b");
+    std::fs::create_dir_all(&home).expect("create home");
+    std::fs::create_dir_all(&project_a).expect("create project-a");
+    std::fs::create_dir_all(&project_b).expect("create project-b");
+
+    // Install a skill from project-a
+    skillet()
+        .args(["install", "joshrotenberg/rust-dev", "--repo"])
+        .arg(test_repo())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(&project_a)
+        .assert()
+        .success();
+
+    // Install a different skill from project-b
+    skillet()
+        .args(["install", "acme/python-dev", "--repo"])
+        .arg(test_repo())
+        .args(["--target", "agents"])
+        .env("HOME", &home)
+        .current_dir(&project_b)
+        .assert()
+        .success();
+
+    // List from project-a should only show project-a's skill
+    skillet()
+        .args(["list"])
+        .env("HOME", &home)
+        .current_dir(&project_a)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("joshrotenberg/rust-dev")
+                .and(predicate::str::contains("acme/python-dev").not()),
+        );
+
+    // List --all from project-a should show both
+    skillet()
+        .args(["list", "--all"])
+        .env("HOME", &home)
+        .current_dir(&project_a)
+        .assert()
+        .success()
+        .stdout(
+            predicate::str::contains("joshrotenberg/rust-dev")
+                .and(predicate::str::contains("acme/python-dev")),
+        );
+}
+
 // ── npm-style repo tests ─────────────────────────────────────
 
 #[test]
