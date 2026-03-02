@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-02
+
+### Bug Fixes
+
+- Show quickstart help when running skillet interactively ([#174](https://github.com/joshrotenberg/skillet/pull/174))
+- Scope `skillet list` to current project and global by default ([#176](https://github.com/joshrotenberg/skillet/pull/176))
+- Soften trust warning on install ([#177](https://github.com/joshrotenberg/skillet/pull/177))
+
+### Documentation
+
+- Quote glob in README search examples ([#178](https://github.com/joshrotenberg/skillet/pull/178))
+
+### Features
+
+- Hint at skill-repos on empty search results ([#179](https://github.com/joshrotenberg/skillet/pull/179))
+
+### Refactor
+
+- Rename registry/ to skills/ ([#181](https://github.com/joshrotenberg/skillet/pull/181))
+- Replace static test fixtures with dynamic generation ([#183](https://github.com/joshrotenberg/skillet/pull/183))
+- Remove registry terminology, add [[suggest]] for discovery ([#184](https://github.com/joshrotenberg/skillet/pull/184))
+
+
+
 ## [0.4.0] - 2026-03-02
 
 ### Bug Fixes
