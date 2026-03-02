@@ -122,12 +122,12 @@ config, then use CLI commands directly:
 skillet setup
 
 # Browse everything
-skillet search *
+skillet search '*'
 
 # Search by keyword, category, tag, or owner
 skillet search rust
-skillet search * --category development
-skillet search * --owner joshrotenberg
+skillet search '*' --category development
+skillet search '*' --owner joshrotenberg
 
 # See what categories exist
 skillet categories
