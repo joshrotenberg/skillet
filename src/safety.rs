@@ -299,6 +299,10 @@ pub fn truncate_match(s: &str, max: usize) -> String {
 mod tests {
     use super::*;
     use crate::state::{Compatibility, SkillInfo};
+    use crate::testutil::TestRepo;
+    use std::sync::LazyLock;
+
+    static TEST_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::standard);
 
     fn empty_metadata() -> SkillMetadata {
         SkillMetadata {
@@ -794,10 +798,7 @@ Use cargo fmt before committing. Run clippy with -D warnings.
 
     #[test]
     fn test_real_skills_clean() {
-        let test_repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo");
-        if !test_repo.exists() {
-            return;
-        }
+        let test_repo = TEST_REPO.path();
 
         // Scan known-good skills (not unsafe-demo)
         let good_skills = [
@@ -809,14 +810,8 @@ Use cargo fmt before committing. Run clippy with -D warnings.
 
         for skill_path in &good_skills {
             let dir = test_repo.join(skill_path);
-            if !dir.exists() {
-                continue;
-            }
             let skill_md_path = dir.join("SKILL.md");
             let skill_toml_path = dir.join("skill.toml");
-            if !skill_md_path.exists() || !skill_toml_path.exists() {
-                continue;
-            }
 
             let skill_md = std::fs::read_to_string(&skill_md_path).unwrap();
             let skill_toml_raw = std::fs::read_to_string(&skill_toml_path).unwrap();

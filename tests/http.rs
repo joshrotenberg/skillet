@@ -13,10 +13,13 @@ fn free_port() -> u16 {
     listener.local_addr().unwrap().port()
 }
 
+static TEST_REPO: std::sync::LazyLock<skillet_mcp::testutil::TestRepo> =
+    std::sync::LazyLock::new(skillet_mcp::testutil::TestRepo::standard);
+
 /// Spawn the skillet HTTP server on the given port, returning the child process.
 fn spawn_server(port: u16) -> Child {
     let bin = assert_cmd::cargo::cargo_bin!("skillet");
-    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo");
+    let repo = TEST_REPO.path();
 
     Command::new(bin)
         .args([

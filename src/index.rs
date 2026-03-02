@@ -629,18 +629,20 @@ pub fn guess_mime_type(filename: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::TestRepo;
+    use std::sync::LazyLock;
 
-    fn test_repo() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-repo")
+    static TEST_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::standard);
+    static TEST_NPM_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::npm_style);
+
+    fn test_repo() -> &'static Path {
+        TEST_REPO.path()
     }
 
     #[test]
     fn test_load_index_from_test_repo() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
         assert!(
             !index.skills.is_empty(),
             "Index should have at least one skill"
@@ -650,10 +652,7 @@ mod tests {
     #[test]
     fn test_multi_version_loading() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // rust-dev has versions.toml with 3 versions
         let entry = index
@@ -691,10 +690,7 @@ mod tests {
     #[test]
     fn test_yanked_version_handling() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // python-dev has 2 versions, first is yanked
         let entry = index
@@ -714,10 +710,7 @@ mod tests {
     #[test]
     fn test_backward_compat_without_versions_toml() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // skillet/setup has no versions.toml -- should load as single version
         let entry = index
@@ -776,10 +769,7 @@ published = "2026-01-01T00:00:00Z"
     #[test]
     fn test_load_config_from_test_repo() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let config = load_config(&test_dir).expect("Failed to load config");
+        let config = load_config(test_dir).expect("Failed to load config");
         // test-repo has a skillet.toml with [project] name = "skillet"
         assert_eq!(config.name, "skillet");
     }
@@ -887,10 +877,7 @@ description = "A skill collection"
     #[test]
     fn test_load_with_manifest_verified() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // code-review has a correct MANIFEST.sha256
         let entry = index
@@ -906,10 +893,7 @@ description = "A skill collection"
     #[test]
     fn test_load_with_manifest_mismatch() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // git-conventions has a deliberately corrupted MANIFEST.sha256
         let entry = index
@@ -925,10 +909,7 @@ description = "A skill collection"
     #[test]
     fn test_load_without_manifest() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // skillet/setup has no MANIFEST.sha256
         let entry = index
@@ -946,10 +927,7 @@ description = "A skill collection"
     #[test]
     fn test_nested_skill_discovery() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // Nested skills should be found
         assert!(
@@ -977,10 +955,7 @@ description = "A skill collection"
     #[test]
     fn test_nested_skill_categories_indexed() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // Categories from nested skills should be in the index
         assert!(
@@ -998,10 +973,7 @@ description = "A skill collection"
     #[test]
     fn test_nested_repo_path_set() {
         let test_dir = test_repo();
-        if !test_dir.exists() {
-            return;
-        }
-        let index = load_index(&test_dir).expect("Failed to load test index");
+        let index = load_index(test_dir).expect("Failed to load test index");
 
         // Nested skills should have repo_path set
         let maven = index
@@ -1161,8 +1133,8 @@ description = "A skill collection"
 
     // ── npm-style repo compatibility tests ───────────────────────────
 
-    fn test_npm_repo() -> std::path::PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test-npm-repo")
+    fn test_npm_repo() -> &'static Path {
+        TEST_NPM_REPO.path()
     }
 
     #[test]
@@ -1247,10 +1219,7 @@ path = "skills"
     #[test]
     fn test_load_index_npm_fixture() {
         let npm_dir = test_npm_repo();
-        if !npm_dir.exists() {
-            return;
-        }
-        let index = load_index(&npm_dir).expect("should load test-npm-repo");
+        let index = load_index(npm_dir).expect("should load test-npm-repo");
 
         assert_eq!(index.skills.len(), 3, "should find 3 skills");
 

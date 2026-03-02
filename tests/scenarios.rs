@@ -8,14 +8,19 @@
 
 use assert_cmd::Command;
 use predicates::prelude::*;
-use std::path::PathBuf;
+use skillet_mcp::testutil::TestRepo;
+use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 
-fn test_repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-repo")
+static TEST_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::standard);
+static TEST_NPM_REPO: LazyLock<TestRepo> = LazyLock::new(TestRepo::npm_style);
+
+fn test_repo() -> &'static Path {
+    TEST_REPO.path()
 }
 
-fn test_npm_repo() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test-npm-repo")
+fn test_npm_repo() -> &'static Path {
+    TEST_NPM_REPO.path()
 }
 
 fn official_repo() -> PathBuf {
@@ -595,8 +600,9 @@ fn scenario_setup_with_repo() {
 
     let config_path = home.join(".config/skillet/config.toml");
     let config = std::fs::read_to_string(&config_path).expect("read config");
+    let repo_path_str = test_repo().to_str().unwrap();
     assert!(
-        config.contains("test-repo"),
+        config.contains(repo_path_str),
         "config should reference the local repo: {config}"
     );
 
