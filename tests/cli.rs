@@ -303,6 +303,53 @@ fn info_npm_repo_no_frontmatter() {
         );
 }
 
+// -- Implicit serve behavior --
+
+#[test]
+fn repo_flag_triggers_serve_with_http() {
+    // --repo with --http should start the server (not show help).
+    // We test by starting the server and hitting health.
+    let port = {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.local_addr().unwrap().port()
+    };
+
+    let mut child = std::process::Command::new(assert_cmd::cargo::cargo_bin!("skillet"))
+        .args([
+            "--repo",
+            test_repo().to_str().unwrap(),
+            "--http",
+            &format!("127.0.0.1:{port}"),
+            "--log-level",
+            "error",
+        ])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn skillet");
+
+    // Poll until server is up or timeout
+    let client = reqwest::blocking::Client::new();
+    let mut ok = false;
+    for _ in 0..50 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        if client
+            .get(format!("http://127.0.0.1:{port}/health"))
+            .send()
+            .is_ok()
+        {
+            ok = true;
+            break;
+        }
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    assert!(
+        ok,
+        "server should start with --repo flag (no explicit serve subcommand)"
+    );
+}
+
 // -- CLI hygiene --
 
 #[test]
