@@ -218,7 +218,12 @@ struct RepoRemoveArgs {
 async fn main() -> ExitCode {
     let cli = Cli::parse();
 
-    let interactive_tty = cli.command.is_none() && std::io::stdin().is_terminal();
+    // If the user provided serve-specific args (--repo, --remote, --http),
+    // they intend to serve even from a TTY. Only show help when truly bare.
+    let has_serve_args =
+        !cli.serve.repo.is_empty() || !cli.serve.remote.is_empty() || cli.serve.http.is_some();
+    let interactive_tty =
+        cli.command.is_none() && std::io::stdin().is_terminal() && !has_serve_args;
 
     match cli.command {
         Some(Command::Init(args)) => cli::author::run_init(args),
