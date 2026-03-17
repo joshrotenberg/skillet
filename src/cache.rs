@@ -15,7 +15,8 @@ use crate::git;
 use crate::state::{SkillEntry, SkillIndex};
 
 /// Bump this to invalidate all caches when the format changes.
-const CACHE_VERSION: u32 = 1;
+/// v2: added trust_tier, discovered_via to SkillEntry
+const CACHE_VERSION: u32 = 2;
 
 /// Identifies the source of a repo for cache path derivation.
 #[derive(Debug)]
