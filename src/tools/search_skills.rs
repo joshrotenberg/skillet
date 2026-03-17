@@ -144,18 +144,10 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     if let Some(ref label) = s.source_label {
                         output.push_str(&format!("**Source:** {label}\n"));
                     }
-                    if let Some(ref status) = s.integrity {
-                        let label = if status == "verified" {
-                            "**Integrity:** verified"
-                        } else {
-                            "**Integrity:** FAILED"
-                        };
-                        output.push_str(&format!("{label}\n"));
+                    if let Some(ref tier) = s.trust_tier {
+                        output.push_str(&format!("**Trust:** {tier}\n"));
                     }
-                    output.push_str(&format!(
-                        "**Use:** Read `skillet://skills/{}/{}` to use this skill\n\n",
-                        s.owner, s.name
-                    ));
+                    output.push_str(&format!("**Prompt:** `{}_{}`\n\n", s.owner, s.name));
                 }
 
                 Ok(CallToolResult::text(output))
