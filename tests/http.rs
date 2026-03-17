@@ -207,11 +207,11 @@ async fn http_list_tools() {
         names.contains(&"search_skills"),
         "should have search_skills"
     );
-    assert!(
-        names.contains(&"install_skill"),
-        "should have install_skill"
-    );
     assert!(names.contains(&"info_skill"), "should have info_skill");
+    assert!(
+        !names.contains(&"install_skill"),
+        "install_skill should be removed"
+    );
 }
 
 // ── Tool invocation ─────────────────────────────────────────────
@@ -300,10 +300,10 @@ async fn http_info_skill() {
     assert!(text.contains("2026.02.24"), "should show version: {text}");
 }
 
-// ── Resource reads ──────────────────────────────────────────────
+// ── Prompts (skills as MCP prompts) ─────────────────────────────
 
 #[tokio::test]
-async fn http_read_skill_resource() {
+async fn http_prompts_list() {
     let port = free_port();
     let _guard = ServerGuard(spawn_server(port));
     wait_for_server(port).await;
@@ -312,13 +312,7 @@ async fn http_read_skill_resource() {
     let base = format!("http://127.0.0.1:{port}");
     let session_id = initialize(&client, &base).await;
 
-    let body = jsonrpc_request(
-        "resources/read",
-        serde_json::json!({
-            "uri": "skillet://skills/joshrotenberg/rust-dev"
-        }),
-        5,
-    );
+    let body = jsonrpc_request("prompts/list", serde_json::json!({}), 10);
     let resp = client
         .post(&base)
         .header("mcp-session-id", &session_id)
@@ -329,23 +323,28 @@ async fn http_read_skill_resource() {
 
     assert_eq!(resp.status(), 200);
     let json: serde_json::Value = resp.json().await.unwrap();
-    let contents = json["result"]["contents"]
-        .as_array()
-        .expect("contents array");
-    let text = contents
-        .iter()
-        .filter_map(|c| c["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n");
+    let prompts = json["result"]["prompts"].as_array().expect("prompts array");
 
+    // Skills should be registered as prompts with owner_name format
+    let names: Vec<&str> = prompts.iter().filter_map(|p| p["name"].as_str()).collect();
     assert!(
-        text.contains("Rust"),
-        "skill content should mention Rust: {text}"
+        names.contains(&"joshrotenberg_rust-dev"),
+        "should have joshrotenberg_rust-dev prompt, got: {names:?}"
+    );
+
+    // Each prompt should have a description
+    let rust_dev = prompts
+        .iter()
+        .find(|p| p["name"].as_str() == Some("joshrotenberg_rust-dev"))
+        .expect("rust-dev prompt");
+    assert!(
+        rust_dev["description"].as_str().is_some(),
+        "prompt should have a description"
     );
 }
 
 #[tokio::test]
-async fn http_read_metadata_resource() {
+async fn http_prompts_get() {
     let port = free_port();
     let _guard = ServerGuard(spawn_server(port));
     wait_for_server(port).await;
@@ -355,11 +354,11 @@ async fn http_read_metadata_resource() {
     let session_id = initialize(&client, &base).await;
 
     let body = jsonrpc_request(
-        "resources/read",
+        "prompts/get",
         serde_json::json!({
-            "uri": "skillet://metadata/joshrotenberg/rust-dev"
+            "name": "joshrotenberg_rust-dev"
         }),
-        6,
+        11,
     );
     let resp = client
         .post(&base)
@@ -371,18 +370,21 @@ async fn http_read_metadata_resource() {
 
     assert_eq!(resp.status(), 200);
     let json: serde_json::Value = resp.json().await.unwrap();
-    let contents = json["result"]["contents"]
+    let messages = json["result"]["messages"]
         .as_array()
-        .expect("contents array");
-    let text = contents
+        .expect("messages array");
+
+    assert!(!messages.is_empty(), "should have at least one message");
+
+    // The message should contain the SKILL.md content
+    let text = messages
         .iter()
-        .filter_map(|c| c["text"].as_str())
+        .filter_map(|m| m["content"]["text"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-
     assert!(
-        text.contains("rust-dev"),
-        "metadata should contain skill name: {text}"
+        text.contains("Rust"),
+        "prompt content should contain Rust skill content: {text}"
     );
 }
 

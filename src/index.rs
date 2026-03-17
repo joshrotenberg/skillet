@@ -9,13 +9,11 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::Error;
-use crate::integrity;
 use crate::project;
 use crate::state::{
     ServerConfig, SkillEntry, SkillFile, SkillIndex, SkillMetadata, SkillSource, SkillVersion,
     VersionsManifest,
 };
-use crate::validate;
 
 /// Maximum directory depth below an owner to search for skill directories.
 /// Prevents runaway recursion on malformed repo trees.
@@ -317,69 +315,87 @@ fn find_skill_dirs(dir: &Path, remaining_depth: usize) -> Vec<PathBuf> {
 
 /// Load a single skill from its directory.
 ///
-/// Uses `validate::validate_skillpack()` for core parsing and validation
-/// when `skill.toml` is present, or `validate::validate_skillpack_lenient()`
-/// for SKILL.md-only directories (zero-config mode).
-///
-/// Then layers on repo-specific checks (owner/name match directory
-/// structure, versions.toml handling).
+/// Parses `skill.toml` (if present) and `SKILL.md` to build a `SkillEntry`.
+/// Directories with only `SKILL.md` are supported in zero-config mode,
+/// where metadata is inferred from the directory name and SKILL.md content.
 ///
 /// If `versions.toml` exists, builds a multi-version `SkillEntry` with one
 /// `SkillVersion` per record. Only the latest version (last entry) has full
 /// content loaded from disk; historical versions are placeholders with
 /// `has_content = false`.
-///
-/// Without `versions.toml`, behaves exactly as before (single version).
 fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<SkillEntry> {
-    let has_skill_toml = dir.join("skill.toml").is_file();
+    let skill_toml_path = dir.join("skill.toml");
+    let skill_md_path = dir.join("SKILL.md");
+    let has_skill_toml = skill_toml_path.is_file();
 
-    let validated = if has_skill_toml {
-        validate::validate_skillpack(dir)?
+    // Read SKILL.md (required)
+    let skill_md = if skill_md_path.is_file() {
+        std::fs::read_to_string(&skill_md_path).map_err(|e| Error::FileRead {
+            path: skill_md_path.clone(),
+            source: e,
+        })?
     } else {
-        // SKILL.md-only: use lenient validation with no manifest context
-        validate::validate_skillpack_lenient(dir, None)?
+        return Err(Error::SkillLoad {
+            path: dir.to_path_buf(),
+            reason: "missing SKILL.md".to_string(),
+        });
     };
 
-    // Repo-specific: owner/name must match directory structure
-    // For lenient mode, the inferred name comes from the directory so it
-    // will always match; only check when skill.toml exists (strict mode).
-    if has_skill_toml {
-        if validated.owner != owner {
+    // Parse metadata from skill.toml or infer from directory/SKILL.md
+    let (metadata, skill_toml_raw) = if has_skill_toml {
+        let raw = std::fs::read_to_string(&skill_toml_path).map_err(|e| Error::FileRead {
+            path: skill_toml_path.clone(),
+            source: e,
+        })?;
+        let meta: SkillMetadata = toml::from_str(&raw).map_err(|e| Error::TomlParse {
+            path: skill_toml_path.clone(),
+            source: e,
+        })?;
+
+        // Owner/name must match directory structure
+        if meta.skill.owner != owner {
             return Err(Error::SkillLoad {
                 path: dir.to_path_buf(),
                 reason: format!(
                     "owner mismatch: skill.toml says '{}' but directory is '{}'",
-                    validated.owner, owner
+                    meta.skill.owner, owner
                 ),
             });
         }
-        if validated.name != name {
+        if meta.skill.name != name {
             return Err(Error::SkillLoad {
                 path: dir.to_path_buf(),
                 reason: format!(
                     "name mismatch: skill.toml says '{}' but directory is '{}'",
-                    validated.name, name
+                    meta.skill.name, name
                 ),
             });
         }
-    }
+
+        (meta, raw)
+    } else {
+        // Zero-config: infer metadata from directory name and SKILL.md
+        let meta = project::infer_metadata(dir, &skill_md, None);
+        (meta, String::new())
+    };
+
+    let files = load_extra_files(dir)?;
 
     let versions_path = dir.join("versions.toml");
     let versions = if versions_path.is_file() {
-        load_versions_manifest(&versions_path, &validated.metadata)?
+        load_versions_manifest(&versions_path, &metadata)?
     } else {
-        // Single-version backward compat
         vec![SkillVersion {
-            version: validated.version,
-            metadata: validated.metadata,
-            skill_md: validated.skill_md,
-            skill_toml_raw: validated.skill_toml_raw,
+            version: metadata.skill.version.clone(),
+            metadata,
+            skill_md,
+            skill_toml_raw,
             yanked: false,
-            files: validated.files,
+            files,
             published: None,
             has_content: true,
-            content_hash: Some(validated.hashes.composite),
-            integrity_ok: validated.manifest_ok,
+            content_hash: None,
+            integrity_ok: None,
         }]
     };
 
@@ -452,10 +468,6 @@ fn load_versions_manifest(
         let is_last = i == total - 1;
 
         if is_last {
-            // Latest version: full content from disk, compute + verify hashes
-            let computed = integrity::compute_hashes(&skill_toml_raw, &skill_md, &files);
-            let (content_hash, integrity_ok) = verify_manifest(skill_dir, &computed);
-
             versions.push(SkillVersion {
                 version: record.version,
                 metadata: current_metadata.clone(),
@@ -465,8 +477,8 @@ fn load_versions_manifest(
                 files: files.clone(),
                 published: Some(record.published),
                 has_content: true,
-                content_hash: Some(content_hash),
-                integrity_ok,
+                content_hash: None,
+                integrity_ok: None,
             });
         } else {
             // Historical version: placeholder metadata, no content
@@ -499,62 +511,6 @@ fn load_versions_manifest(
     }
 
     Ok(versions)
-}
-
-/// Read and verify a `MANIFEST.sha256` file against computed hashes.
-///
-/// Returns `(composite_hash, integrity_ok)` where `integrity_ok` is:
-/// - `None` if no manifest exists (backward compat)
-/// - `Some(true)` if hashes match
-/// - `Some(false)` if mismatches detected (logged as warnings)
-fn verify_manifest(
-    skill_dir: &Path,
-    computed: &integrity::ContentHashes,
-) -> (String, Option<bool>) {
-    let manifest_path = skill_dir.join("MANIFEST.sha256");
-    let content_hash = computed.composite.clone();
-
-    if !manifest_path.is_file() {
-        return (content_hash, None);
-    }
-
-    let raw = match std::fs::read_to_string(&manifest_path) {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::warn!(
-                path = %manifest_path.display(),
-                error = %e,
-                "Failed to read MANIFEST.sha256, skipping verification"
-            );
-            return (content_hash, None);
-        }
-    };
-
-    let expected = match integrity::parse_manifest(&raw) {
-        Ok(h) => h,
-        Err(e) => {
-            tracing::warn!(
-                path = %manifest_path.display(),
-                error = %e,
-                "Failed to parse MANIFEST.sha256, skipping verification"
-            );
-            return (content_hash, None);
-        }
-    };
-
-    let mismatches = integrity::verify(computed, &expected);
-    if mismatches.is_empty() {
-        (content_hash, Some(true))
-    } else {
-        for m in &mismatches {
-            tracing::warn!(
-                path = %manifest_path.display(),
-                mismatch = %m,
-                "Content integrity check failed"
-            );
-        }
-        (content_hash, Some(false))
-    }
 }
 
 /// Allowed subdirectories in a skillpack (per Agent Skills spec).
@@ -872,54 +828,6 @@ description = "A skill collection"
         };
 
         assert!(entry.latest().is_none());
-    }
-
-    #[test]
-    fn test_load_with_manifest_verified() {
-        let test_dir = test_repo();
-        let index = load_index(test_dir).expect("Failed to load test index");
-
-        // code-review has a correct MANIFEST.sha256
-        let entry = index
-            .skills
-            .get(&("joshrotenberg".to_string(), "code-review".to_string()))
-            .expect("code-review should exist");
-
-        let latest = entry.latest().expect("should have latest");
-        assert!(latest.content_hash.is_some());
-        assert_eq!(latest.integrity_ok, Some(true));
-    }
-
-    #[test]
-    fn test_load_with_manifest_mismatch() {
-        let test_dir = test_repo();
-        let index = load_index(test_dir).expect("Failed to load test index");
-
-        // git-conventions has a deliberately corrupted MANIFEST.sha256
-        let entry = index
-            .skills
-            .get(&("acme".to_string(), "git-conventions".to_string()))
-            .expect("git-conventions should exist");
-
-        let latest = entry.latest().expect("should have latest");
-        assert!(latest.content_hash.is_some());
-        assert_eq!(latest.integrity_ok, Some(false));
-    }
-
-    #[test]
-    fn test_load_without_manifest() {
-        let test_dir = test_repo();
-        let index = load_index(test_dir).expect("Failed to load test index");
-
-        // skillet/setup has no MANIFEST.sha256
-        let entry = index
-            .skills
-            .get(&("skillet".to_string(), "setup".to_string()))
-            .expect("skillet/setup should exist");
-
-        let latest = entry.latest().expect("should have latest");
-        assert!(latest.content_hash.is_some());
-        assert_eq!(latest.integrity_ok, None);
     }
 
     // ── Nested skill discovery tests ─────────────────────────────────

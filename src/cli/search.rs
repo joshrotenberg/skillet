@@ -1,10 +1,9 @@
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use skillet_mcp::{config, manifest, repo, search, state};
+use skillet_mcp::{config, repo, search, state};
 
 use super::parse_skill_ref;
-use crate::{CategoriesArgs, InfoArgs, ListArgs, SearchArgs};
+use crate::{CategoriesArgs, InfoArgs, SearchArgs};
 
 /// Run the `search` subcommand.
 pub(crate) fn run_search(args: SearchArgs) -> ExitCode {
@@ -272,23 +271,6 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
         println!("  published ............. {published}");
     }
 
-    // Content hash
-    if let Some(ref hash) = latest.content_hash {
-        let display = if hash.len() > 17 {
-            format!("{}...", &hash[..17])
-        } else {
-            hash.clone()
-        };
-        println!("  content hash .......... {display}");
-    }
-
-    // Integrity
-    match latest.integrity_ok {
-        Some(true) => println!("  integrity ............. verified"),
-        Some(false) => println!("  integrity ............. MISMATCH"),
-        None => {}
-    }
-
     // Version history
     let available: Vec<&str> = entry
         .versions
@@ -303,69 +285,6 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
     // Repo path for nested skills
     if let Some(ref rpath) = entry.repo_path {
         println!("  repo path ......... {rpath}");
-    }
-
-    ExitCode::SUCCESS
-}
-
-/// Run the `list` subcommand.
-pub(crate) fn run_list(args: ListArgs) -> ExitCode {
-    let installed_manifest = match manifest::load() {
-        Ok(m) => m,
-        Err(e) => {
-            eprintln!("Error loading installation manifest: {e}");
-            return ExitCode::from(1);
-        }
-    };
-
-    let cwd = std::env::current_dir().unwrap_or_default();
-    let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
-
-    let skills: Vec<&manifest::InstalledSkill> = installed_manifest
-        .skills
-        .iter()
-        .filter(|s| {
-            args.all || s.installed_to.starts_with(&home) || s.installed_to.starts_with(&cwd)
-        })
-        .collect();
-
-    if skills.is_empty() {
-        if installed_manifest.skills.is_empty() {
-            println!("No skills installed.");
-        } else {
-            println!("No skills installed in this scope.");
-            println!("Use --all to see all installations.");
-        }
-        return ExitCode::SUCCESS;
-    }
-
-    // Group by (owner, name)
-    let mut groups: std::collections::BTreeMap<(String, String), Vec<&manifest::InstalledSkill>> =
-        std::collections::BTreeMap::new();
-    for skill in &skills {
-        groups
-            .entry((skill.owner.clone(), skill.name.clone()))
-            .or_default()
-            .push(skill);
-    }
-
-    println!(
-        "{} skill{} installed:\n",
-        groups.len(),
-        if groups.len() == 1 { "" } else { "s" }
-    );
-
-    for ((owner, name), entries) in &groups {
-        let version = &entries[0].version;
-        println!("  {owner}/{name} v{version}");
-        for entry in entries {
-            println!(
-                "    -> {}  ({})",
-                entry.installed_to.display(),
-                entry.installed_at,
-            );
-        }
-        println!();
     }
 
     ExitCode::SUCCESS

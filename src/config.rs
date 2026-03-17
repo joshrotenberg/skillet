@@ -1,7 +1,7 @@
-//! CLI configuration: config file loading, install targets, and shared utilities.
+//! CLI configuration: config file loading and shared utilities.
 //!
 //! The skillet config file lives at `~/.config/skillet/config.toml` and controls
-//! default install targets, repos, and other CLI behavior.
+//! repos, server behavior, and other CLI settings.
 
 use std::path::{Path, PathBuf};
 
@@ -13,79 +13,23 @@ use crate::error::Error;
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SkilletConfig {
-    pub install: InstallConfig,
     #[serde(alias = "registries")]
     pub repos: ReposConfig,
     pub cache: CacheConfig,
-    pub safety: SafetyConfig,
-    pub trust: TrustConfig,
     pub server: ServerConfig,
 }
 
 /// `[server]` section: MCP server tool/resource exposure control.
 ///
 /// Empty lists (the default) mean "expose all". When non-empty, only the
-/// listed capabilities are registered. Short names are used:
-///
-/// Tools: `search`, `categories`, `owner`, `install`
-/// Resources: `skills`, `metadata`, `files`
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// listed capabilities are registered.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ServerConfig {
     /// Tool short names to expose. Empty = all.
     pub tools: Vec<String>,
     /// Resource short names to expose. Empty = all.
     pub resources: Vec<String>,
-    /// Auto-discover skills from local agent directories (default: true).
-    #[serde(default = "default_discover_local")]
-    pub discover_local: bool,
-}
-
-impl Default for ServerConfig {
-    fn default() -> Self {
-        Self {
-            tools: Vec::new(),
-            resources: Vec::new(),
-            discover_local: true,
-        }
-    }
-}
-
-fn default_discover_local() -> bool {
-    true
-}
-
-/// `[safety]` section: rule suppression for safety scanning.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct SafetyConfig {
-    /// Rule IDs to suppress (e.g. `["exfiltration-curl"]`).
-    pub suppress: Vec<String>,
-}
-
-/// `[trust]` section: trust tier and content hash pinning behavior.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct TrustConfig {
-    /// Policy for skills from unknown (unpinned) sources.
-    /// "warn" (default), "prompt", or "block".
-    pub unknown_policy: String,
-    /// Automatically pin content hash on install.
-    pub auto_pin: bool,
-    /// Require pinned hash for installs.
-    /// When true, blocks installs from unknown sources.
-    #[serde(default)]
-    pub require_trusted: bool,
-}
-
-impl Default for TrustConfig {
-    fn default() -> Self {
-        Self {
-            unknown_policy: "warn".to_string(),
-            auto_pin: true,
-            require_trusted: false,
-        }
-    }
 }
 
 /// `[cache]` section: disk cache for the skill index.
@@ -103,23 +47,6 @@ impl Default for CacheConfig {
         Self {
             enabled: true,
             ttl: "5m".to_string(),
-        }
-    }
-}
-
-/// `[install]` section: default targets and global flag.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct InstallConfig {
-    pub targets: Vec<String>,
-    pub global: bool,
-}
-
-impl Default for InstallConfig {
-    fn default() -> Self {
-        Self {
-            targets: vec!["agents".to_string()],
-            global: false,
         }
     }
 }
@@ -157,89 +84,6 @@ fn default_suggest_depth() -> u32 {
     1
 }
 
-/// An agent platform to install skills into.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum InstallTarget {
-    Agents,
-    Claude,
-    Cursor,
-    Copilot,
-    Windsurf,
-    Gemini,
-}
-
-/// All known install targets.
-pub const ALL_TARGETS: &[InstallTarget] = &[
-    InstallTarget::Agents,
-    InstallTarget::Claude,
-    InstallTarget::Cursor,
-    InstallTarget::Copilot,
-    InstallTarget::Windsurf,
-    InstallTarget::Gemini,
-];
-
-impl InstallTarget {
-    /// Parse a target string. Returns `Ok(None)` for "all" (caller expands).
-    pub fn parse(s: &str) -> crate::error::Result<Option<Self>> {
-        match s.to_lowercase().as_str() {
-            "all" => Ok(None),
-            "agents" => Ok(Some(Self::Agents)),
-            "claude" => Ok(Some(Self::Claude)),
-            "cursor" => Ok(Some(Self::Cursor)),
-            "copilot" => Ok(Some(Self::Copilot)),
-            "windsurf" => Ok(Some(Self::Windsurf)),
-            "gemini" => Ok(Some(Self::Gemini)),
-            other => Err(Error::Config(format!(
-                "Unknown install target: {other}. \
-                 Valid targets: agents, claude, cursor, copilot, windsurf, gemini, all"
-            ))),
-        }
-    }
-
-    /// Project-local install directory for a skill.
-    pub fn project_dir(&self, name: &str) -> PathBuf {
-        match self {
-            Self::Agents => PathBuf::from(format!(".agents/skills/{name}/")),
-            Self::Claude => PathBuf::from(format!(".claude/skills/{name}/")),
-            Self::Cursor => PathBuf::from(format!(".cursor/skills/{name}/")),
-            Self::Copilot => PathBuf::from(format!(".github/skills/{name}/")),
-            Self::Windsurf => PathBuf::from(format!(".windsurf/skills/{name}/")),
-            Self::Gemini => PathBuf::from(format!(".gemini/skills/{name}/")),
-        }
-    }
-
-    /// Global install directory for a skill.
-    pub fn global_dir(&self, name: &str) -> PathBuf {
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        match self {
-            Self::Agents => PathBuf::from(format!("{home}/.agents/skills/{name}/")),
-            Self::Claude => PathBuf::from(format!("{home}/.claude/skills/{name}/")),
-            Self::Cursor => PathBuf::from(format!("{home}/.cursor/skills/{name}/")),
-            Self::Copilot => PathBuf::from(format!("{home}/.copilot/skills/{name}/")),
-            Self::Windsurf => PathBuf::from(format!("{home}/.codeium/windsurf/skills/{name}/")),
-            Self::Gemini => PathBuf::from(format!("{home}/.gemini/skills/{name}/")),
-        }
-    }
-
-    /// Human-readable name.
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Agents => "agents",
-            Self::Claude => "claude",
-            Self::Cursor => "cursor",
-            Self::Copilot => "copilot",
-            Self::Windsurf => "windsurf",
-            Self::Gemini => "gemini",
-        }
-    }
-}
-
-impl std::fmt::Display for InstallTarget {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
 /// Load CLI configuration from `~/.config/skillet/config.toml`.
 ///
 /// Returns defaults if the file is absent. Errors if present but malformed.
@@ -264,42 +108,6 @@ pub fn load_config_from(path: &Path) -> crate::error::Result<SkilletConfig> {
     Ok(config)
 }
 
-/// Resolve install targets from CLI flags and config.
-///
-/// Priority: flag targets > config targets > default ("agents").
-pub fn resolve_targets(
-    flag_targets: &[String],
-    config: &SkilletConfig,
-) -> crate::error::Result<Vec<InstallTarget>> {
-    let raw = if !flag_targets.is_empty() {
-        flag_targets
-    } else if !config.install.targets.is_empty() {
-        &config.install.targets
-    } else {
-        return Ok(vec![InstallTarget::Agents]);
-    };
-
-    let mut targets = Vec::new();
-    for s in raw {
-        match InstallTarget::parse(s)? {
-            Some(t) => {
-                if !targets.contains(&t) {
-                    targets.push(t);
-                }
-            }
-            None => {
-                // "all" -- expand to all targets
-                for &t in ALL_TARGETS {
-                    if !targets.contains(&t) {
-                        targets.push(t);
-                    }
-                }
-            }
-        }
-    }
-    Ok(targets)
-}
-
 /// The skillet config directory: `~/.config/skillet/`.
 pub fn config_dir() -> PathBuf {
     if let Ok(home) = std::env::var("HOME") {
@@ -307,49 +115,6 @@ pub fn config_dir() -> PathBuf {
     } else {
         PathBuf::from("/tmp").join("skillet").join("config")
     }
-}
-
-/// Build a default `SkilletConfig` for first-time setup.
-///
-/// Validates the target via `InstallTarget::parse()`. Builds a config with the
-/// provided repos and target. Everything else uses struct defaults.
-pub fn generate_default_config(
-    remotes: Vec<String>,
-    local: Vec<PathBuf>,
-    target: &str,
-) -> crate::error::Result<SkilletConfig> {
-    // Validate the target string (allows "all" or any known target)
-    let _ = InstallTarget::parse(target)?;
-
-    Ok(SkilletConfig {
-        install: InstallConfig {
-            targets: vec![target.to_string()],
-            global: false,
-        },
-        repos: ReposConfig {
-            local,
-            remote: remotes,
-            ..Default::default()
-        },
-        ..Default::default()
-    })
-}
-
-/// Write a `SkilletConfig` to the default config path. Returns the path written.
-pub fn write_config(config: &SkilletConfig) -> crate::error::Result<PathBuf> {
-    let dir = config_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| Error::CreateDir {
-        path: dir.clone(),
-        source: e,
-    })?;
-
-    let path = dir.join("config.toml");
-    let content = toml::to_string_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
-    std::fs::write(&path, content).map_err(|e| Error::WriteFile {
-        path: path.clone(),
-        source: e,
-    })?;
-    Ok(path)
 }
 
 /// Add a remote repo URL to the config. Returns false if already present.
@@ -383,6 +148,23 @@ pub fn remove_local(config: &mut SkilletConfig, path: &Path) -> bool {
     let before = config.repos.local.len();
     config.repos.local.retain(|p| p != path);
     config.repos.local.len() < before
+}
+
+/// Write a `SkilletConfig` to the default config path. Returns the path written.
+pub fn write_config(config: &SkilletConfig) -> crate::error::Result<PathBuf> {
+    let dir = config_dir();
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Io {
+        context: format!("create config dir {}", dir.display()),
+        source: e,
+    })?;
+
+    let path = dir.join("config.toml");
+    let content = toml::to_string_pretty(config).map_err(|e| Error::Config(e.to_string()))?;
+    std::fs::write(&path, content).map_err(|e| Error::Io {
+        context: format!("write config to {}", path.display()),
+        source: e,
+    })?;
+    Ok(path)
 }
 
 /// Current time as ISO 8601 string (UTC).
@@ -424,15 +206,9 @@ mod tests {
     fn test_load_defaults_when_absent() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("nonexistent.toml");
-        // load_config_from should fail on missing file, but load_config()
-        // returns defaults. Test the default path:
         let config = SkilletConfig::default();
-        assert_eq!(config.install.targets, vec!["agents"]);
-        assert!(!config.install.global);
         assert!(config.repos.local.is_empty());
         assert!(config.repos.remote.is_empty());
-
-        // load_config_from on missing file should error
         assert!(load_config_from(&path).is_err());
     }
 
@@ -443,10 +219,6 @@ mod tests {
         std::fs::write(
             &path,
             r#"
-[install]
-targets = ["claude", "cursor"]
-global = true
-
 [registries]
 local = ["/path/to/local"]
 remote = ["https://github.com/owner/repo.git"]
@@ -455,8 +227,6 @@ remote = ["https://github.com/owner/repo.git"]
         .unwrap();
 
         let config = load_config_from(&path).unwrap();
-        assert_eq!(config.install.targets, vec!["claude", "cursor"]);
-        assert!(config.install.global);
         assert_eq!(config.repos.local, vec![PathBuf::from("/path/to/local")]);
         assert_eq!(
             config.repos.remote,
@@ -465,136 +235,11 @@ remote = ["https://github.com/owner/repo.git"]
     }
 
     #[test]
-    fn test_parse_partial_config() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(
-            &path,
-            r#"
-[install]
-targets = ["gemini"]
-"#,
-        )
-        .unwrap();
-
-        let config = load_config_from(&path).unwrap();
-        assert_eq!(config.install.targets, vec!["gemini"]);
-        assert!(!config.install.global);
-        assert!(config.repos.local.is_empty());
-    }
-
-    #[test]
     fn test_malformed_toml_errors() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("config.toml");
         std::fs::write(&path, "this is not valid toml {{{").unwrap();
         assert!(load_config_from(&path).is_err());
-    }
-
-    #[test]
-    fn test_resolve_targets_flag_overrides_config() {
-        let config = SkilletConfig {
-            install: InstallConfig {
-                targets: vec!["claude".to_string()],
-                global: false,
-            },
-            repos: ReposConfig::default(),
-            ..Default::default()
-        };
-        let flags = vec!["cursor".to_string()];
-        let targets = resolve_targets(&flags, &config).unwrap();
-        assert_eq!(targets, vec![InstallTarget::Cursor]);
-    }
-
-    #[test]
-    fn test_resolve_targets_falls_back_to_config() {
-        let config = SkilletConfig {
-            install: InstallConfig {
-                targets: vec!["claude".to_string(), "cursor".to_string()],
-                global: false,
-            },
-            repos: ReposConfig::default(),
-            ..Default::default()
-        };
-        let targets = resolve_targets(&[], &config).unwrap();
-        assert_eq!(targets, vec![InstallTarget::Claude, InstallTarget::Cursor]);
-    }
-
-    #[test]
-    fn test_resolve_targets_default_agents() {
-        let config = SkilletConfig {
-            install: InstallConfig {
-                targets: Vec::new(),
-                global: false,
-            },
-            repos: ReposConfig::default(),
-            ..Default::default()
-        };
-        let targets = resolve_targets(&[], &config).unwrap();
-        assert_eq!(targets, vec![InstallTarget::Agents]);
-    }
-
-    #[test]
-    fn test_all_expands_to_all_targets() {
-        let config = SkilletConfig::default();
-        let flags = vec!["all".to_string()];
-        let targets = resolve_targets(&flags, &config).unwrap();
-        assert_eq!(targets.len(), ALL_TARGETS.len());
-        for &t in ALL_TARGETS {
-            assert!(targets.contains(&t));
-        }
-    }
-
-    #[test]
-    fn test_invalid_target_errors() {
-        let result = InstallTarget::parse("vscode");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_project_dir_paths() {
-        assert_eq!(
-            InstallTarget::Agents.project_dir("my-skill"),
-            PathBuf::from(".agents/skills/my-skill/")
-        );
-        assert_eq!(
-            InstallTarget::Claude.project_dir("my-skill"),
-            PathBuf::from(".claude/skills/my-skill/")
-        );
-        assert_eq!(
-            InstallTarget::Cursor.project_dir("my-skill"),
-            PathBuf::from(".cursor/skills/my-skill/")
-        );
-        assert_eq!(
-            InstallTarget::Copilot.project_dir("my-skill"),
-            PathBuf::from(".github/skills/my-skill/")
-        );
-        assert_eq!(
-            InstallTarget::Windsurf.project_dir("my-skill"),
-            PathBuf::from(".windsurf/skills/my-skill/")
-        );
-        assert_eq!(
-            InstallTarget::Gemini.project_dir("my-skill"),
-            PathBuf::from(".gemini/skills/my-skill/")
-        );
-    }
-
-    #[test]
-    fn test_global_dir_paths() {
-        // Set HOME for deterministic test
-        let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
-        assert_eq!(
-            InstallTarget::Agents.global_dir("my-skill"),
-            PathBuf::from(format!("{home}/.agents/skills/my-skill/"))
-        );
-        assert_eq!(
-            InstallTarget::Copilot.global_dir("my-skill"),
-            PathBuf::from(format!("{home}/.copilot/skills/my-skill/"))
-        );
-        assert_eq!(
-            InstallTarget::Windsurf.global_dir("my-skill"),
-            PathBuf::from(format!("{home}/.codeium/windsurf/skills/my-skill/"))
-        );
     }
 
     #[test]
@@ -634,35 +279,8 @@ suggest_depth = 3
     }
 
     #[test]
-    fn test_dedup_targets() {
-        let config = SkilletConfig::default();
-        let flags = vec!["claude".to_string(), "claude".to_string()];
-        let targets = resolve_targets(&flags, &config).unwrap();
-        assert_eq!(targets, vec![InstallTarget::Claude]);
-    }
-
-    #[test]
     fn test_server_config_defaults_empty() {
         let config = SkilletConfig::default();
-        assert!(config.server.tools.is_empty());
-        assert!(config.server.resources.is_empty());
-        assert!(config.server.discover_local);
-    }
-
-    #[test]
-    fn test_server_config_missing_section_defaults() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(
-            &path,
-            r#"
-[install]
-targets = ["claude"]
-"#,
-        )
-        .unwrap();
-
-        let config = load_config_from(&path).unwrap();
         assert!(config.server.tools.is_empty());
         assert!(config.server.resources.is_empty());
     }
@@ -684,78 +302,6 @@ resources = ["skills", "metadata"]
         let config = load_config_from(&path).unwrap();
         assert_eq!(config.server.tools, vec!["search", "categories"]);
         assert_eq!(config.server.resources, vec!["skills", "metadata"]);
-        // discover_local defaults to true when not specified
-        assert!(config.server.discover_local);
-    }
-
-    #[test]
-    fn test_discover_local_defaults_true() {
-        let config = SkilletConfig::default();
-        assert!(config.server.discover_local);
-    }
-
-    #[test]
-    fn test_generate_default_config_basic() {
-        let config = generate_default_config(
-            vec!["https://example.com/repo.git".into()],
-            vec![],
-            "agents",
-        )
-        .unwrap();
-        assert_eq!(config.install.targets, vec!["agents"]);
-        assert_eq!(config.repos.remote, vec!["https://example.com/repo.git"]);
-        assert!(config.repos.local.is_empty());
-    }
-
-    #[test]
-    fn test_generate_default_config_invalid_target() {
-        let result = generate_default_config(vec![], vec![], "invalid");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_write_config_roundtrip() {
-        let tmp = tempfile::tempdir().unwrap();
-        // Override HOME so config_dir() writes to our temp dir
-        let prev_home = std::env::var("HOME").ok();
-        // SAFETY: test is single-threaded; we restore HOME immediately after.
-        unsafe { std::env::set_var("HOME", tmp.path()) };
-
-        let config = generate_default_config(
-            vec!["https://example.com/repo.git".into()],
-            vec![],
-            "claude",
-        )
-        .unwrap();
-        let path = write_config(&config).unwrap();
-        assert!(path.exists());
-
-        let loaded = load_config_from(&path).unwrap();
-        assert_eq!(loaded.install.targets, vec!["claude"]);
-        assert_eq!(loaded.repos.remote, vec!["https://example.com/repo.git"]);
-
-        // Restore HOME
-        if let Some(h) = prev_home {
-            // SAFETY: restoring original value.
-            unsafe { std::env::set_var("HOME", h) };
-        }
-    }
-
-    #[test]
-    fn test_discover_local_opt_out() {
-        let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join("config.toml");
-        std::fs::write(
-            &path,
-            r#"
-[server]
-discover_local = false
-"#,
-        )
-        .unwrap();
-
-        let config = load_config_from(&path).unwrap();
-        assert!(!config.server.discover_local);
     }
 
     #[test]
