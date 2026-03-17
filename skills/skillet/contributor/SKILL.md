@@ -21,24 +21,16 @@ src/
   search.rs      # SkillSearch: BM25 full-text search over skill metadata
   bm25.rs        # Vendored BM25 engine
   cache.rs       # Persistent disk cache for SkillIndex
-  config.rs      # Configuration loading (SkilletConfig, SafetyConfig, InstallConfig)
+  config.rs      # Configuration loading (SkilletConfig)
   error.rs       # Error types (thiserror)
   git.rs         # Git operations: clone, pull, head
-  install.rs     # CLI install: resolve skill, write to agent skill directories
-  integrity.rs   # SHA256 content hashing, MANIFEST.sha256 verification
-  manifest.rs    # Manifest generation
+  prompts.rs     # DynamicPromptRegistry integration, skills as MCP prompts
   project.rs     # skillet.toml unified manifest types and loading
   repo.rs        # Repo management: init, load, merge
-  safety.rs      # Pattern-based static analysis for dangerous content
+  resolve.rs     # Release model resolution (tags/releases/main)
   scaffold.rs    # init-skill, init-registry, init-project scaffolding
-  validate.rs    # Skillpack validation
-  version.rs     # CLI version check with upgrade suggestions
-  pack.rs        # Validate + generate manifest + update versions.toml
-  publish.rs     # Pack + open PR via gh CLI
-  discover.rs    # Auto-discovery of locally installed agent skills
-  trust.rs       # Trust tiers and content hash pinning
+  suggest.rs     # [[suggest]] decentralized discovery graph walker
   tools/         # MCP tools: search_skills, list_categories, etc.
-  resources/     # MCP resources: skill_content, skill_metadata, skill_files
 ```
 
 **Key types**:
@@ -46,11 +38,11 @@ src/
 - `AppState` -- holds `RwLock<SkillIndex>`, `RwLock<SkillSearch>`, repo paths, config
 - `SkillIndex` -- maps `(owner, name)` to `SkillEntry` with `merge()` for multi-repo
 - `SkillSearch` -- wraps BM25 index, rebuilt on refresh
-- `SkillSource` -- three variants: `Registry`, `Local`, `Embedded`
+- `SkillSource` -- variants: `Registry`, `Embedded`
 
 **Data flow**: repos (local/remote) are loaded into `SkillIndex`, merged
 first-match-wins, then `SkillSearch` is built from the merged index.
-MCP tools query the search index; resources read from the index directly.
+MCP tools query the search index; skills are served as MCP prompts.
 
 ### Development Setup
 

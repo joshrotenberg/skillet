@@ -1,12 +1,12 @@
 ---
 name: setup
-description: Set up and configure Skillet skill discovery. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
+description: Set up and configure Skillet skill discovery. Use when the user wants to set up skillet, configure repos, or customize server behavior.
 ---
 
 ## Skillet Setup
 
 Skillet is an MCP-native skill discovery tool. It gives you access to a
-searchable library of agent skills at runtime -- no installation required.
+searchable library of agent skills at runtime, served as MCP prompts.
 
 ### Adding Skillet to Your Project
 
@@ -41,40 +41,15 @@ After adding, restart your agent to connect.
 
 ### Using Skills
 
-Once connected, you have three ways to use skills:
-
-**Inline (recommended for most cases)**:
-Search for a skill, read it via the resource template, and follow its
-instructions for the current session. No restart needed, no files written.
+Once connected, skills are available as MCP prompts. Search for a skill,
+then use it as a prompt for the current session. No files written, no
+restart needed.
 
 ```
 1. search_skills("rust development")
-2. Read skillet://skills/joshrotenberg/rust-dev
+2. Use the skill prompt for joshrotenberg/rust-dev
 3. Follow the skill's instructions
 ```
-
-**Install locally**:
-Write the skill to disk for persistent use across sessions.
-
-- Project-level: `.claude/skills/<skill-name>.md`
-- Global: `~/.claude/skills/<skill-name>.md`
-
-Requires a restart to take effect.
-
-**Install and use**:
-Write the file for future sessions AND follow the instructions inline
-for immediate use. Best of both worlds.
-
-### User Preferences
-
-If the user has a preference for how skills should be used, respect it:
-
-- If they say "always inline" or "don't install anything", only use
-  skills inline via the resource template.
-- If they say "install it", write the SKILL.md to the appropriate
-  skills directory.
-- If unclear, default to inline use and ask if they want to install
-  for future sessions.
 
 ### Discovering Skills
 
@@ -93,11 +68,34 @@ Use `info_skill("skillet/skill-repos")` to see the curated list.
 
 ### Configuration
 
-Run `skillet setup` to generate `~/.config/skillet/config.toml`:
+Skillet is configured via `~/.config/skillet/config.toml` and CLI flags.
+
+**Adding custom repos**:
 
 ```bash
-skillet setup                          # default setup
-skillet setup --target claude          # set default install target
-skillet setup --remote <url>           # add a custom repo
-skillet setup --no-official-registry   # skip the official repo
+skillet serve --remote https://github.com/org/skills.git
 ```
+
+**Skipping the official repo**:
+
+```bash
+skillet serve --no-official-repo
+```
+
+**Config file** (`~/.config/skillet/config.toml`):
+
+```toml
+[repos]
+remote = ["https://github.com/org/skills.git"]
+
+[server]
+discover_local = false
+```
+
+### User Preferences
+
+If the user has a preference for how skills should be used, respect it:
+
+- If they say "always inline" or "don't install anything", only use
+  skills inline via MCP prompts.
+- If unclear, default to inline use via prompts.

@@ -14,14 +14,14 @@ MCP-native skill discovery for AI agents.
 
 ## What is skillet
 
-Skillet serves agent skills over MCP. Your agent connects, searches
-for skills relevant to the current task, reads them, and uses them
-immediately -- no installation, no restart. It also works as a CLI
-for browsing, installing, and managing skills across agents.
+Skillet serves agent skills as MCP prompts. Your agent connects,
+searches for skills relevant to the current task, and uses them
+immediately via `prompts/get` -- no installation, no restart. It also
+works as a CLI for browsing skills and managing repos.
 
 Skills are just SKILL.md files in git repos. Anyone can create a
 skill repo and share it. Skillet indexes them, runs full-text
-search, and delivers them to agents at runtime. Think of it like
+search, and delivers them as MCP prompts at runtime. Think of it like
 git: skillet is the tool, repos are distributed.
 
 Skills follow the
@@ -64,7 +64,7 @@ the [releases page](https://github.com/joshrotenberg/skillet/releases).
 ### Give your agent access to skills (fastest)
 
 Add skillet to your agent's MCP config and you're done -- your agent
-can search, read, and install skills at runtime:
+can search for skills and use them as prompts at runtime:
 
 ```json
 {
@@ -91,9 +91,8 @@ Or with Docker (zero install):
 
 That's it. Skillet auto-discovers the
 [official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
-and any skills already installed on your machine. Your agent now has
-access to `search_skills`, `install_skill`, and the full
-[MCP interface](#mcp-interface).
+and serves all skills as MCP prompts. Your agent now has access to
+`search_skills` and the full [MCP interface](#mcp-interface).
 
 For custom or team repos, add `--remote` or `--repo` args:
 
@@ -113,13 +112,7 @@ For custom or team repos, add `--remote` or `--repo` args:
 
 ### Use the CLI
 
-For hands-on skill management, run `skillet setup` to write a default
-config, then use CLI commands directly:
-
 ```bash
-# One-time setup (writes ~/.config/skillet/config.toml)
-skillet setup
-
 # Browse everything
 skillet search '*'
 
@@ -133,23 +126,7 @@ skillet categories
 
 # Show details about a skill
 skillet info joshrotenberg/rust-dev
-
-# Install into your project
-skillet install joshrotenberg/rust-dev
-
-# Install for a specific agent
-skillet install joshrotenberg/rust-dev --target claude
-
-# Install for all supported agents at once
-skillet install joshrotenberg/rust-dev --target all
-
-# See what's installed
-skillet list
 ```
-
-The default install target is `agents` (writes to `.agents/skills/`),
-which is the cross-agent convention. Other targets: `claude`, `cursor`,
-`copilot`, `windsurf`, `gemini`, `all`.
 
 ### Embed skills in your project
 
@@ -191,8 +168,8 @@ User: Set up a new Rust project with CI
 Agent: Let me search for relevant skills.
        [calls search_skills(query: "rust", category: "development")]
 
-       Found joshrotenberg/rust-dev. Let me fetch its instructions.
-       [reads skillet://skills/joshrotenberg/rust-dev]
+       Found joshrotenberg/rust-dev. Let me use its instructions.
+       [calls prompts/get(name: "joshrotenberg_rust-dev")]
 
        I'll follow the rust-dev skill conventions for project setup...
 ```
@@ -210,6 +187,13 @@ Found 2 skills matching "rust"
 
 ## Features
 
+### Skills as MCP prompts
+
+Every skill in the index is registered as an MCP prompt, namespaced as
+`owner_skill-name`. Agents discover skills via `prompts/list` and fetch
+content via `prompts/get`. When the index refreshes, prompts are synced
+automatically and a `prompts/list_changed` notification is emitted.
+
 ### Multi-repo support
 
 Aggregate local directories and remote git repos. Skillet clones and
@@ -225,7 +209,7 @@ skillet search rust \
 # Or configure defaults in ~/.config/skillet/config.toml
 ```
 
-### Decentralized discovery
+### Decentralized discovery (suggest graph)
 
 Repos can suggest other repos via `[[suggest]]` entries in their
 `skillet.toml`. Skillet follows these on startup to build a discovery
@@ -239,7 +223,45 @@ url = "https://github.com/acme/agent-skills.git"
 description = "Acme team skills"
 ```
 
-Opt out with `--no-suggest` or set `follow_suggestions = false` in config.
+Skills discovered through the suggest graph are stamped with a hop-based
+trust tier:
+
+| Tier | Description |
+|---|---|
+| **Direct** | From a directly configured repo (depth 0) |
+| **Suggested** | One hop away via a `[[suggest]]` link |
+| **Transitive** | Two or more hops from a configured repo |
+
+The suggest walker has configurable safety limits: max depth, max repos,
+per-repo fan-out caps, clone timeout, URL allow/block lists, and negative
+caching for failed URLs.
+
+Opt out with `--no-suggest` or set `enabled = false` under `[suggest]`
+in config.
+
+### Release model resolution
+
+Skillet respects release conventions when fetching repos:
+
+1. **Consumer pin** (`[[source]]` in config.toml) -- highest priority.
+   Lock a repo to a specific tag, branch, or commit.
+2. **Author preference** (`[source]` in skillet.toml) -- the repo author
+   declares `prefer = "release"`, `"main"`, or `"tag:v*"`.
+3. **Auto-detect** -- if neither is set, skillet checks for a latest
+   release tag; if none exists, it stays on the default branch.
+
+```toml
+# Consumer-side pin in ~/.config/skillet/config.toml
+[[source]]
+repo = "github.com/someone/skills"
+version = "v2.1.0"
+```
+
+```toml
+# Author-side preference in skillet.toml
+[source]
+prefer = "release"
+```
 
 ### Project manifest (skillet.toml)
 
@@ -287,57 +309,6 @@ discoverable. Metadata is inferred automatically:
 `skill.toml` adds richer metadata (categories, tags, compatibility)
 but is never required.
 
-### Local skill discovery
-
-Skillet auto-discovers skills already installed in agent directories
-(`~/.claude/skills/`, `~/.agents/skills/`, `~/.cursor/skills/`, etc.)
-and includes them alongside repo skills. No extra config required.
-
-### Safety scanning
-
-Static analysis runs automatically during `validate`. 13 regex-based
-rules detect dangerous patterns:
-
-- **Danger** (blocks publish): shell injection, hardcoded credentials,
-  private keys, token patterns
-- **Warning** (informational): exfiltration URLs, safety bypasses,
-  obfuscation, over-broad capabilities
-
-```bash
-skillet validate myname/my-skill     # includes safety scan
-skillet validate myname/my-skill --skip-safety  # bypass if needed
-```
-
-Suppress specific rules in config:
-
-```toml
-# ~/.config/skillet/config.toml
-[safety]
-suppress = ["exfiltration-curl"]
-```
-
-### Trust and integrity
-
-Content hashing (SHA256) verifies skills haven't been tampered with.
-Two trust tiers:
-
-- **Reviewed** -- skills whose content hash you've pinned after review
-- **Unknown** -- everything else (warns on install)
-
-```bash
-# Pin a skill's content hash after reviewing it
-skillet trust pin joshrotenberg/rust-dev
-
-# Audit installed skills against pinned hashes
-skillet audit
-
-# See pinned skills
-skillet trust list
-```
-
-Content hashes are auto-pinned on install (configurable via
-`[trust].auto_pin` in config).
-
 ### BM25 full-text search
 
 Search indexes skill names, descriptions, categories, tags, and SKILL.md
@@ -347,8 +318,8 @@ field-weighted boosting.
 ### Persistent disk cache
 
 The skill index is cached to disk and refreshed based on TTL (default: 5
-minutes). No rebuilding the index from scratch every time. Use
-`--no-cache` to bypass.
+minutes). The suggest graph has its own TTL (default: 1 hour). No
+rebuilding from scratch every time. Use `--no-cache` to bypass.
 
 ### Filesystem watching
 
@@ -357,25 +328,20 @@ files change. Useful during skill development.
 
 ### Configurable server exposure
 
-Control which MCP tools and resources are exposed:
+Control which MCP tools are exposed:
 
 ```bash
-# Read-only: hide install_skill
+# Read-only mode
 skillet --read-only
 
 # Explicit allowlist
-skillet --tools search,categories,info --resources skills,metadata
-
-# Or configure in config.toml:
-# [server]
-# tools = ["search", "categories", "info"]
-# resources = ["skills", "metadata"]
+skillet --tools search,categories,info
 ```
 
 ## MCP interface
 
 When running as an MCP server, agents discover skills via tools and
-fetch content via resource templates.
+fetch skill content as prompts.
 
 ### Tools
 
@@ -385,30 +351,20 @@ fetch content via resource templates.
 | `list_categories` | Browse all skill categories with counts |
 | `list_skills_by_owner` | List all skills by a specific publisher |
 | `info_skill` | Detailed information about a specific skill |
-| `compare_skills` | Side-by-side comparison of two or more skills |
-| `skill_status` | Check install status and trust tier for a skill |
-| `install_skill` | Install a skill to the local filesystem |
-| `list_installed` | List all skills installed on the local filesystem |
-| `audit_skills` | Verify installed skills against pinned content hashes |
-| `setup_config` | Generate initial configuration at `~/.config/skillet/config.toml` |
-| `validate_skill` | Validate a skillpack directory for correctness and safety |
 
-### Resources
+### Prompts
 
-| Resource | Purpose |
-|---|---|
-| `skillet://skills/{owner}/{name}` | Fetch SKILL.md content (latest version) |
-| `skillet://skills/{owner}/{name}/{version}` | Fetch a specific version |
-| `skillet://metadata/{owner}/{name}` | Fetch skill.toml metadata |
-| `skillet://files/{owner}/{name}/{path}` | Fetch extra files (scripts, references, assets) |
+Every indexed skill is served as an MCP prompt via `prompts/list` and
+`prompts/get`. Prompt names are namespaced as `owner_skill-name` (e.g.
+`joshrotenberg_rust-dev`). The prompt description comes from skill.toml
+metadata and the prompt content is the full SKILL.md text.
+
+When the index refreshes (repo pull, filesystem watch, or cache
+expiration), prompts are synced automatically: new skills are registered,
+removed skills are unregistered, and a `prompts/list_changed` notification
+is emitted to connected clients.
 
 ## CLI reference
-
-### Getting started
-
-| Command | Description |
-|---|---|
-| `skillet setup` | Generate initial config. Supports `--target`, `--remote`, `--force` |
 
 ### Use skills
 
@@ -417,16 +373,12 @@ fetch content via resource templates.
 | `skillet search <query>` | Search for skills (`*` for all). Supports `--category`, `--tag`, `--owner` |
 | `skillet categories` | List all skill categories with counts |
 | `skillet info <owner/name>` | Show detailed information about a skill |
-| `skillet install <owner/name>` | Install a skill. Supports `--target`, `--global`, `--version` |
-| `skillet uninstall <owner/name>` | Uninstall a skill. Supports `--unpin` to also remove trust pin |
-| `skillet list` | List installed skills |
 
 ### Author skills
 
 | Command | Description |
 |---|---|
 | `skillet init [path]` | Generate a `skillet.toml` project manifest. Supports `--skill`, `--multi` |
-| `skillet validate <path>` | Validate a skillpack (includes safety scan). Supports `--skip-safety` |
 
 ### Manage repos
 
@@ -436,15 +388,6 @@ fetch content via resource templates.
 | `skillet repo remove <url_or_path>` | Remove a repo from config |
 | `skillet repo list` | List configured repos |
 | `skillet [serve]` | Run the MCP server (default when stdin is not a terminal) |
-
-### Trust and audit
-
-| Command | Description |
-|---|---|
-| `skillet trust pin <owner/name>` | Pin a skill's content hash |
-| `skillet trust unpin <owner/name>` | Remove a content hash pin |
-| `skillet trust list` | Show pinned skills |
-| `skillet audit` | Verify installed skills against pinned hashes |
 
 ### Server options
 
@@ -457,9 +400,8 @@ fetch content via resource templates.
 | `--subdir <path>` | Subdirectory within repos containing skills |
 | `--watch` | Watch local repos for changes and auto-reload |
 | `--http <addr>` | Serve over HTTP instead of stdio (e.g. `0.0.0.0:8080`) |
-| `--read-only` | Don't expose the install_skill tool |
+| `--read-only` | Expose only read-only tools |
 | `--tools <list>` | Explicit tool allowlist (comma-separated) |
-| `--resources <list>` | Explicit resource allowlist (comma-separated) |
 | `--no-suggest` | Don't follow `[[suggest]]` entries from repos |
 
 **HTTP transport note**: `--http` disables origin validation to allow
@@ -469,14 +411,10 @@ authentication and CORS configuration.
 
 ## Configuration
 
-Skillet reads `~/.config/skillet/config.toml` for defaults. Run
-`skillet setup` to generate one, or create it manually:
+Skillet reads `~/.config/skillet/config.toml` for defaults. Create it
+manually or use `skillet repo add` to populate repos:
 
 ```toml
-[install]
-targets = ["agents"]    # default install target(s)
-global = false          # install globally vs project-local
-
 [repos]
 remote = ["https://github.com/joshrotenberg/skillet.git"]
 local = []
@@ -486,19 +424,26 @@ suggest_depth = 1           # max recursion depth for suggestions
 [cache]
 enabled = true
 ttl = "5m"              # index cache time-to-live
+suggest_ttl = "1h"      # suggest graph cache TTL
 
-[safety]
-suppress = []           # rule IDs to suppress
-
-[trust]
-unknown_policy = "warn"   # "warn", "prompt", or "block"
-auto_pin = true           # pin content hash on install
-require_trusted = false   # block installs from unknown sources
+[suggest]
+enabled = true
+max_depth = 2           # max BFS depth for suggest graph
+max_per_repo = 5        # max suggestions per repo
+max_repos = 20          # total max repos via suggestions
+clone_timeout = "30s"
+negative_cache_ttl = "1h"
+allow = []              # URL glob allowlist (empty = allow all)
+block = []              # URL glob blocklist
 
 [server]
 tools = []              # empty = expose all
 resources = []          # empty = expose all
-discover_local = true   # auto-discover installed skills
+
+# Consumer-side version pinning
+[[source]]
+repo = "github.com/someone/skills"
+version = "v2.1.0"
 ```
 
 ## Skill format
@@ -546,17 +491,16 @@ verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
 
 The `SKILL.md` is the prompt itself -- fully compatible with the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills).
-Drop it into `.claude/skills/` or any agent's skill directory and it
-works standalone.
 
 ## Status
 
-v0.2.0. The skill format is stable, both the CLI and MCP interface are
-functional, and there's an
+v0.4.0. Skills are served as MCP prompts via `prompts/list` and
+`prompts/get`. The suggest graph provides decentralized discovery with
+hop-based trust tiers. Release model resolution respects author
+preferences and consumer pins. The CLI covers search, info, categories,
+init, and repo management. There is an
 [official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
 with skills across development, devops, and security categories.
-`skillet.toml` provides a unified project manifest for embedding skills
-in any repository with zero-config discovery.
 
 See [open issues](https://github.com/joshrotenberg/skillet/issues) for
 what's next.

@@ -1,26 +1,27 @@
 ---
 name: skill-author
-description: Authoring and publishing skills for skillet. Covers the skill format, validation, packing, and publishing workflow.
+description: Authoring skills for skillet. Covers the skill format, discovery via suggest, and project manifests.
 ---
 
 ## Skill Authoring Guide
 
 ### Skill Format
 
-A skillpack is a directory with two required files:
+A skill is a directory with a required `SKILL.md` file:
 
 ```
 owner/skill-name/
-  skill.toml       # metadata (required for publishing)
   SKILL.md         # the skill prompt (required)
+  skill.toml       # metadata for indexing (optional, inferred if absent)
   scripts/         # optional executable scripts
   references/      # optional reference docs
   assets/          # optional templates, configs
 ```
 
 **Zero-config mode**: a directory with only `SKILL.md` is discoverable.
-Metadata is inferred from the directory name and content. `skill.toml` is
-only required for publishing.
+Metadata (name, owner, version, description) is inferred from the directory
+name, git remote, and SKILL.md content. `skill.toml` adds explicit metadata
+for better search results.
 
 ### skill.toml
 
@@ -70,9 +71,6 @@ Instructions for the agent...
 - `scripts/` -- executable scripts the skill references
 - `references/` -- reference documentation for context
 - `assets/` -- templates, configs, or other static files
-- `rules/` -- rule files (npm-style registries)
-
-All extra files are included in the manifest and installed alongside SKILL.md.
 
 ### Scaffolding
 
@@ -81,50 +79,19 @@ skillet init-skill owner/skill-name
 skillet init-skill owner/skill-name --description "My skill" --category development --tags "rust,testing"
 ```
 
-### Validation
+### Discovery via Suggest
 
-```bash
-skillet validate path/to/skill      # structural check + safety scan
-skillet validate path/to/skill --skip-safety   # skip safety scan
-skillet validate path/to/skill --lenient       # allow missing optional fields
+Use `[[suggest]]` in your repo's `skillet.toml` to create a decentralized
+discovery graph. Each suggest entry points to another repo that skillet
+can traverse to find more skills:
+
+```toml
+[[suggest]]
+url = "https://github.com/org/their-skills.git"
+description = "Skills from org"
 ```
 
-Validation checks: skill.toml parse, required fields, SKILL.md exists,
-owner/name consistency, and safety scanning.
-
-Exit codes: 0 = pass, 1 = structural error, 2 = safety danger.
-
-### Safety Scanning
-
-Skillet runs static analysis on skill content by default. 13 regex rules
-check for:
-
-- **Danger** (blocks publish): shell injection, hardcoded credentials,
-  private keys, known token patterns
-- **Warning** (informational): exfiltration patterns, safety bypasses,
-  obfuscation, over-broad capabilities
-
-Suppression via `[safety].suppress` in `~/.config/skillet/config.toml`.
-
-### Packing
-
-```bash
-skillet pack path/to/skill
-```
-
-Validates, generates `MANIFEST.sha256` (content hashes), and updates
-`versions.toml` (version history). Run before publishing.
-
-### Publishing
-
-```bash
-skillet publish path/to/skill --repo owner/skill-repo
-skillet publish path/to/skill --repo owner/skill-repo --dry-run
-skillet publish path/to/skill --repo owner/skill-repo --registry-path custom/path
-```
-
-Publishing: packs the skill, forks the target repo, creates a branch,
-copies files, and opens a PR via `gh` CLI.
+This lets users discover skills across repos without a central authority.
 
 ### Project Manifest
 
@@ -134,4 +101,20 @@ Embed skills in any repository with `skillet.toml`:
 skillet init-project path --skill     # single inline skill
 skillet init-project path --multi     # multi-skill directory
 skillet init-project path --registry  # repo configuration
+```
+
+```toml
+[project]
+name = "my-tool"
+description = "A CLI tool"
+
+# Single inline skill (SKILL.md at project root)
+[skill]
+name = "my-tool-usage"
+description = "How to use my-tool"
+
+# Or multiple skills in a subdirectory
+[skills]
+path = ".skillet"
+members = ["api", "debug"]
 ```
