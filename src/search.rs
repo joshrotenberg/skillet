@@ -126,6 +126,8 @@ mod tests {
             name: name.to_string(),
             repo_path: None,
             source: Default::default(),
+            trust_tier: Default::default(),
+            discovered_via: Vec::new(),
             versions: vec![SkillVersion {
                 version: "1.0.0".to_string(),
                 metadata: SkillMetadata {

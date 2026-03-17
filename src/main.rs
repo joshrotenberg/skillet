@@ -439,25 +439,28 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     }
 
     // Follow [[suggest]] entries from loaded repos
-    if !args.no_suggest && cli_config.repos.follow_suggestions {
-        let suggest_depth = cli_config.repos.suggest_depth;
+    if !args.no_suggest && cli_config.suggest.enabled {
         let cache_enabled = cli_config.cache.enabled;
         let cache_ttl = if cache_enabled {
             repo::parse_duration(&cli_config.cache.ttl).unwrap_or(Duration::from_secs(300))
         } else {
             Duration::ZERO
         };
-        let visited: std::collections::HashSet<String> = args.remote.iter().cloned().collect();
-        let seed_paths = repo_paths.clone();
-        repo::follow_suggestions_serve(
-            &seed_paths,
+        let seed_urls: Vec<String> = args.remote.clone();
+        let mut walker = skillet_mcp::suggest::SuggestWalker::new(
+            &cli_config.suggest,
             &cache_base,
             cache_enabled,
             cache_ttl,
+            &seed_urls,
+        );
+        let seed_paths = repo_paths.clone();
+        walker.walk(
+            &seed_paths,
             &mut merged_index,
             &mut repo_paths,
-            visited,
-            suggest_depth,
+            cli_config.suggest.max_depth,
+            vec![],
         );
     }
 

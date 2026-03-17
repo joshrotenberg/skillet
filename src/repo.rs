@@ -1,6 +1,5 @@
 //! Repo management: initialization, loading, and utility functions.
 
-use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -8,7 +7,7 @@ use crate::cache::{self, RepoSource};
 use crate::config::SkilletConfig;
 use crate::error::Error;
 use crate::state::SkillIndex;
-use crate::{git, index, project};
+use crate::{git, index};
 
 /// The official default repo, used when no repos are configured.
 pub const DEFAULT_REPO_URL: &str = "https://github.com/joshrotenberg/skillet.git";
@@ -188,152 +187,26 @@ pub fn load_repos(
     }
 
     // Follow [[suggest]] entries from loaded repos
-    if !no_suggest && config.repos.follow_suggestions {
-        let depth = config.repos.suggest_depth;
-        let visited: HashSet<String> = remote_urls.iter().map(|u| u.to_string()).collect();
-        follow_suggestions_serve(
-            &repo_paths,
+    if !no_suggest && config.suggest.enabled {
+        let seed_urls: Vec<String> = remote_urls.iter().map(|u| u.to_string()).collect();
+        let mut walker = crate::suggest::SuggestWalker::new(
+            &config.suggest,
             &cache_base,
             cache_enabled,
             cache_ttl,
+            &seed_urls,
+        );
+        let seed_paths = repo_paths.clone();
+        walker.walk(
+            &seed_paths,
             &mut merged,
-            &mut repo_paths.clone(),
-            visited,
-            depth,
+            &mut repo_paths,
+            config.suggest.max_depth,
+            vec![],
         );
     }
 
     Ok((merged, repo_paths))
-}
-
-/// Walk up from a skills subdirectory to find the repo root containing `skillet.toml`.
-///
-/// Checks the given path and its ancestors (up to 5 levels) for a `skillet.toml`.
-fn find_repo_root(skill_path: &Path) -> Option<PathBuf> {
-    let mut current = skill_path.to_path_buf();
-    for _ in 0..5 {
-        if current.join("skillet.toml").is_file() {
-            return Some(current);
-        }
-        if !current.pop() {
-            break;
-        }
-    }
-    None
-}
-
-/// Follow `[[suggest]]` entries from loaded repos.
-///
-/// For each repo path, reads `skillet.toml` (walking up from the skills
-/// subdirectory if needed), collects `[[suggest]]` entries not yet visited,
-/// clones/indexes each, and merges into the index. Recurses up to `depth`.
-///
-/// Called by both `load_repos` (CLI path) and `run_serve_inner` (MCP path).
-#[allow(clippy::too_many_arguments)]
-pub fn follow_suggestions_serve(
-    repo_paths: &[PathBuf],
-    cache_base: &Path,
-    cache_enabled: bool,
-    cache_ttl: Duration,
-    merged: &mut SkillIndex,
-    all_paths: &mut Vec<PathBuf>,
-    mut visited: HashSet<String>,
-    depth: u32,
-) {
-    if depth == 0 {
-        return;
-    }
-
-    let mut new_suggestions = Vec::new();
-
-    for path in repo_paths {
-        // Find the repo root (skillet.toml might be above the skills subdir)
-        let root = find_repo_root(path).or_else(|| {
-            // If the path has a parent, try that too
-            path.parent().and_then(find_repo_root)
-        });
-
-        let root = match root {
-            Some(r) => r,
-            None => continue,
-        };
-
-        let manifest = match project::load_skillet_toml(&root) {
-            Ok(Some(m)) => m,
-            _ => continue,
-        };
-
-        for entry in &manifest.suggest {
-            if entry.url.is_empty() || visited.contains(&entry.url) {
-                continue;
-            }
-            visited.insert(entry.url.clone());
-
-            tracing::debug!(
-                url = %entry.url,
-                description = entry.description.as_deref().unwrap_or(""),
-                "Following suggestion"
-            );
-
-            let target = cache_dir_for_url(cache_base, &entry.url);
-            if let Some(parent) = target.parent()
-                && let Err(e) = std::fs::create_dir_all(parent)
-            {
-                tracing::warn!(url = %entry.url, error = %e, "Failed to create cache dir for suggestion");
-                continue;
-            }
-
-            if let Err(e) = git::clone_or_pull(&entry.url, &target) {
-                tracing::warn!(url = %entry.url, error = %e, "Failed to clone suggested repo");
-                continue;
-            }
-
-            let skill_path = match &entry.subdir {
-                Some(sub) => target.join(sub),
-                None => target.clone(),
-            };
-
-            let source = RepoSource::Remote {
-                url: entry.url.clone(),
-                checkout: target,
-            };
-
-            if cache_enabled && let Some(idx) = cache::load(&source, cache_ttl) {
-                merged.merge(idx);
-                all_paths.push(skill_path.clone());
-                new_suggestions.push(skill_path);
-                continue;
-            }
-
-            match index::load_index(&skill_path) {
-                Ok(idx) => {
-                    if cache_enabled {
-                        cache::write(&source, &idx);
-                    }
-                    merged.merge(idx);
-                    all_paths.push(skill_path.clone());
-                    new_suggestions.push(skill_path);
-                }
-                Err(e) => {
-                    tracing::warn!(url = %entry.url, error = %e, "Failed to index suggested repo");
-                }
-            }
-        }
-    }
-
-    // Recurse for the newly added repos
-    if !new_suggestions.is_empty() && depth > 1 {
-        follow_suggestions_serve(
-            &new_suggestions,
-            cache_base,
-            cache_enabled,
-            cache_ttl,
-            merged,
-            all_paths,
-            visited,
-            depth - 1,
-        );
-    }
 }
 
 /// Identify a repo for manifest entries.
@@ -451,31 +324,6 @@ mod tests {
 
         let id = repo_id(&cached_path, std::slice::from_ref(&url));
         assert_eq!(id, url);
-    }
-
-    #[test]
-    fn test_find_repo_root_at_root() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("skillet.toml"), "[project]\n").unwrap();
-        let found = find_repo_root(tmp.path());
-        assert_eq!(found, Some(tmp.path().to_path_buf()));
-    }
-
-    #[test]
-    fn test_find_repo_root_from_subdir() {
-        let tmp = tempfile::tempdir().unwrap();
-        std::fs::write(tmp.path().join("skillet.toml"), "[project]\n").unwrap();
-        let skills = tmp.path().join("skills");
-        std::fs::create_dir_all(&skills).unwrap();
-        let found = find_repo_root(&skills);
-        assert_eq!(found, Some(tmp.path().to_path_buf()));
-    }
-
-    #[test]
-    fn test_find_repo_root_not_found() {
-        let tmp = tempfile::tempdir().unwrap();
-        let found = find_repo_root(tmp.path());
-        assert!(found.is_none());
     }
 
     #[test]

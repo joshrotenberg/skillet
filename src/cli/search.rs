@@ -284,7 +284,17 @@ pub(crate) fn run_info(args: InfoArgs) -> ExitCode {
 
     // Repo path for nested skills
     if let Some(ref rpath) = entry.repo_path {
-        println!("  repo path ......... {rpath}");
+        println!("  repo path ............. {rpath}");
+    }
+
+    // Trust tier and provenance
+    if entry.trust_tier != skillet_mcp::state::TrustTier::Direct {
+        let via = if entry.discovered_via.is_empty() {
+            String::new()
+        } else {
+            format!(" (via {})", entry.discovered_via.join(" -> "))
+        };
+        println!("  trust ................. {}{via}", entry.trust_tier);
     }
 
     ExitCode::SUCCESS

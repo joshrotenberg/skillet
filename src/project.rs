@@ -664,6 +664,8 @@ fn build_embedded_entry(
             content_hash: None,
             integrity_ok: None,
         }],
+        trust_tier: Default::default(),
+        discovered_via: Vec::new(),
     })
 }
 
@@ -776,6 +778,8 @@ fn build_embedded_entry_from_dir(
             content_hash: None,
             integrity_ok: None,
         }],
+        trust_tier: Default::default(),
+        discovered_via: Vec::new(),
     })
 }
 

@@ -5,6 +5,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::time::Duration;
 
 use crate::error::Error;
 
@@ -82,6 +83,66 @@ pub fn clone_or_pull(url: &str, target: &Path) -> crate::error::Result<()> {
     } else {
         tracing::info!(url, path = %target.display(), "Cloning remote repo");
         clone(url, target)
+    }
+}
+
+/// Clone or pull with a timeout for git HTTP operations.
+///
+/// Sets `GIT_HTTP_LOW_SPEED_LIMIT` and `GIT_HTTP_LOW_SPEED_TIME` environment
+/// variables to make git itself abort slow connections. This avoids needing
+/// process kill logic and works for both clone and pull.
+///
+/// Note: these env vars only affect HTTP(S) transports; SSH clones use
+/// the SSH client's own timeout configuration.
+pub fn clone_or_pull_with_timeout(
+    url: &str,
+    target: &Path,
+    timeout: Duration,
+) -> crate::error::Result<()> {
+    let timeout_secs = timeout.as_secs().max(1).to_string();
+
+    if target.join(".git").exists() {
+        tracing::info!(path = %target.display(), "Pulling existing clone (with timeout)");
+        let output = Command::new("git")
+            .args(["pull"])
+            .current_dir(target)
+            .env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+            .env("GIT_HTTP_LOW_SPEED_TIME", &timeout_secs)
+            .output()
+            .map_err(|e| Error::Io {
+                context: "failed to run git pull".to_string(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(Error::Git {
+                operation: "pull".to_string(),
+                stderr,
+            });
+        }
+        Ok(())
+    } else {
+        tracing::info!(url, path = %target.display(), "Cloning remote repo (with timeout)");
+        let output = Command::new("git")
+            .args(["clone", "--depth", "1", url])
+            .arg(target)
+            .env("GIT_HTTP_LOW_SPEED_LIMIT", "1000")
+            .env("GIT_HTTP_LOW_SPEED_TIME", &timeout_secs)
+            .output()
+            .map_err(|e| Error::Io {
+                context: "failed to run git clone".to_string(),
+                source: e,
+            })?;
+
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            return Err(Error::Git {
+                operation: format!("clone {url}"),
+                stderr,
+            });
+        }
+        Ok(())
     }
 }
 

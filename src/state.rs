@@ -138,6 +138,28 @@ impl SkillSource {
     }
 }
 
+/// How a skill was discovered, determining its trust level.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TrustTier {
+    /// From a directly configured repo (depth 0)
+    #[default]
+    Direct,
+    /// From a repo that a direct repo suggested (depth 1)
+    Suggested,
+    /// From a repo at depth >= 2 in the suggest graph
+    Transitive,
+}
+
+impl std::fmt::Display for TrustTier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Direct => f.write_str("direct"),
+            Self::Suggested => f.write_str("suggested"),
+            Self::Transitive => f.write_str("transitive"),
+        }
+    }
+}
+
 /// A skill with all its versions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SkillEntry {
@@ -154,6 +176,13 @@ pub struct SkillEntry {
     pub versions: Vec<SkillVersion>,
     #[serde(default)]
     pub source: SkillSource,
+    /// Trust level based on how the skill was discovered in the suggest graph.
+    #[serde(default)]
+    pub trust_tier: TrustTier,
+    /// Provenance chain: repo URLs traversed to discover this skill.
+    /// Empty for directly configured repos.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub discovered_via: Vec<String>,
 }
 
 impl SkillEntry {
@@ -308,6 +337,12 @@ pub struct SkillSummary {
     /// Source label for display (e.g. "local (claude)")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_label: Option<String>,
+    /// Trust tier (omitted for "direct")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trust_tier: Option<String>,
+    /// Provenance chain of repo URLs
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub discovered_via: Vec<String>,
 }
 
 impl SkillSummary {
@@ -348,6 +383,11 @@ impl SkillSummary {
             content_hash: v.content_hash.clone(),
             integrity,
             source_label: entry.source.label(),
+            trust_tier: match entry.trust_tier {
+                TrustTier::Direct => None,
+                ref t => Some(t.to_string()),
+            },
+            discovered_via: entry.discovered_via.clone(),
         })
     }
 }
@@ -392,6 +432,8 @@ mod tests {
             repo_path: None,
             versions,
             source: SkillSource::Repo,
+            trust_tier: Default::default(),
+            discovered_via: Vec::new(),
         }
     }
 
