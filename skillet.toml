@@ -17,6 +17,15 @@ path = "skills"
 # Any repo can suggest others; use --no-suggest to opt out.
 
 [[suggest]]
+url = "https://github.com/microsoft/skills.git"
+subdir = ".github/plugins"
+description = "Microsoft Azure SDK and dev skills (170 skills)"
+
+[[suggest]]
+url = "https://github.com/TerminalSkills/skills.git"
+description = "Broad skill library covering 800+ tools and frameworks"
+
+[[suggest]]
 url = "https://github.com/firebase/skills.git"
 description = "Firebase agent skills"
 

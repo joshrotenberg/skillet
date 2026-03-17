@@ -98,6 +98,64 @@ pub fn load_index(repo_path: &Path) -> crate::error::Result<SkillIndex> {
         return Ok(index);
     }
 
+    // Auto-detect skills/ directory: repos without skillet.toml that have a
+    // skills/<name>/SKILL.md layout (e.g. TerminalSkills/skills, callstack).
+    // Infer owner from git remote or directory name.
+    let skills_dir = repo_path.join("skills");
+    if skills_dir.is_dir() {
+        let skill_dirs = find_skill_dirs(&skills_dir, 0);
+        if !skill_dirs.is_empty() {
+            let git_root = find_git_root(repo_path).unwrap_or(repo_path.to_path_buf());
+            let owner = project::owner_from_git_remote(&git_root).unwrap_or_else(|| {
+                repo_path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            });
+
+            tracing::info!(
+                owner = %owner,
+                count = skill_dirs.len(),
+                "Auto-detected skills/ directory"
+            );
+
+            for skill_dir in skill_dirs {
+                let skill_name = skill_dir
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+
+                match load_skill(&owner, &skill_name, &skill_dir) {
+                    Ok(entry) => {
+                        let key = (owner.clone(), skill_name.clone());
+                        if let Some(v) = entry.latest()
+                            && let Some(ref c) = v.metadata.skill.classification
+                        {
+                            for cat in &c.categories {
+                                *index.categories.entry(cat.clone()).or_insert(0) += 1;
+                            }
+                        }
+                        index.skills.insert(key, entry);
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            owner = %owner,
+                            skill = %skill_name,
+                            error = %e,
+                            "skills/ auto-detect: skipping skill"
+                        );
+                    }
+                }
+            }
+
+            if !index.skills.is_empty() {
+                return Ok(index);
+            }
+        }
+    }
+
     // Iterate over owner directories
     let mut owners: Vec<_> = std::fs::read_dir(repo_path)
         .map_err(|e| Error::FileRead {
