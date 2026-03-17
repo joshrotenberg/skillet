@@ -1,12 +1,12 @@
 ---
 name: user
-description: Using skillet as a skill consumer. Covers searching, installing, and managing skills from repos.
+description: Using skillet as a skill consumer. Covers searching, browsing, and using skills as MCP prompts.
 ---
 
 ## Skillet User Guide
 
 Skillet is an MCP-native skill discovery toolkit. This skill covers using
-skillet as a consumer: finding, installing, and managing skills.
+skillet as a consumer: finding and using skills at runtime via MCP prompts.
 
 ### Adding Skillet
 
@@ -58,58 +58,44 @@ skillet search "*" --owner joshrotenberg
 - `search_skills(query)` -- full-text BM25 search over skill metadata and content
 - `list_categories()` -- browse available categories with counts
 - `list_skills_by_owner(owner)` -- list all skills by a publisher
+- `info_skill(owner_name)` -- detailed information about a specific skill
 
 ### Using Skills
 
-**Inline (recommended)**: search, read the skill content via the MCP resource,
-and follow its instructions for the current session. No files written, no
-restart needed.
+Skills are served as MCP prompts. An agent connects to skillet, searches
+for a relevant skill, and uses it as a prompt for the current session.
+No files written, no restart needed.
 
 ```
 1. search_skills("rust development")
-2. Read skillet://skills/joshrotenberg/rust-dev
+2. Use the skill prompt for joshrotenberg/rust-dev
 3. Follow the skill's instructions
-```
-
-**Install locally**: write the skill to disk for persistent use.
-
-```bash
-skillet install joshrotenberg/rust-dev --target claude
-skillet install joshrotenberg/rust-dev --target agents
-skillet install joshrotenberg/rust-dev --global
-```
-
-Target directories:
-- `claude` -- `.claude/skills/<name>/`
-- `agents` -- `.agents/skills/<name>/`
-- `--global` -- `~/.claude/skills/<name>/` or `~/.agents/skills/<name>/`
-
-### Managing Installed Skills
-
-```bash
-skillet list                    # show all installed skills
-skillet audit                   # verify integrity of installed skills
-skillet trust list              # show trusted repos and pinned skills
-skillet trust pin owner/name    # pin a skill's content hash
 ```
 
 ### Configuration
 
-Run `skillet setup` to generate `~/.config/skillet/config.toml`:
+Skillet is configured via `~/.config/skillet/config.toml` and CLI flags.
+
+**Adding custom repos**:
 
 ```bash
-skillet setup                          # default setup
-skillet setup --target claude          # set default install target
-skillet setup --remote <url>           # add a custom repo
-skillet setup --no-official-registry   # skip the official repo
+skillet serve --remote https://github.com/org/skills.git
 ```
 
-The config file controls default install targets, repos, cache settings,
-and trust configuration.
+**Config file** (`~/.config/skillet/config.toml`):
+
+```toml
+[repos]
+remote = ["https://github.com/org/skills.git"]
+
+[server]
+discover_local = false
+```
+
+To skip the official repo, use `--no-official-repo`.
 
 ### User Preferences
 
 If you prefer a specific workflow, tell your agent:
-- "always inline" -- only use skills via MCP resources, never install
-- "install it" -- write skills to disk for persistence
-- If unclear, default to inline use and offer to install for future sessions
+- "always inline" -- only use skills via MCP prompts, never write files
+- If unclear, default to inline use via prompts

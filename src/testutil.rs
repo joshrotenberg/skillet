@@ -14,7 +14,7 @@ impl TestRepo {
     /// Build the standard test repo (13 skills across 5 owners).
     ///
     /// Replaces the static `test-repo/` fixture. Includes multi-version skills,
-    /// yanked versions, MANIFEST.sha256 (valid and corrupted), nested skills,
+    /// yanked versions, nested skills,
     /// extra files (scripts/, references/, assets/), and the unsafe-demo skill.
     pub fn standard() -> Self {
         let dir = tempfile::tempdir().expect("create temp dir");
@@ -31,12 +31,11 @@ impl TestRepo {
         write(d.join("SKILL.md"), RUST_DEV_SKILL_MD);
         write(d.join("versions.toml"), RUST_DEV_VERSIONS_TOML);
 
-        // code-review (with valid MANIFEST.sha256)
+        // code-review
         let d = skill_dir(root, "joshrotenberg/code-review");
         write(d.join("skill.toml"), CODE_REVIEW_SKILL_TOML);
         write(d.join("SKILL.md"), CODE_REVIEW_SKILL_MD);
         write(d.join("versions.toml"), CODE_REVIEW_VERSIONS_TOML);
-        // MANIFEST.sha256 no longer used (integrity checking removed)
 
         // security-audit (with extra files)
         let d = skill_dir(root, "joshrotenberg/security-audit");
@@ -68,7 +67,7 @@ impl TestRepo {
         write_extra(&d, "references/RUFF_CONFIG.md", RUFF_CONFIG_MD);
         write_extra(&d, "scripts/lint.sh", LINT_SH);
 
-        // git-conventions (with deliberately corrupted MANIFEST.sha256)
+        // git-conventions
         let d = skill_dir(root, "acme/git-conventions");
         write(d.join("skill.toml"), GIT_CONVENTIONS_SKILL_TOML);
         write(d.join("SKILL.md"), GIT_CONVENTIONS_SKILL_MD);
