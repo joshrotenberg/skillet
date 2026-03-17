@@ -99,8 +99,11 @@ pub struct ServerConfig {
 pub struct CacheConfig {
     /// Whether disk caching is enabled.
     pub enabled: bool,
-    /// Time-to-live for cached index files (e.g. "5m", "1h", "0").
+    /// Time-to-live for cached skill content (e.g. "5m", "1h", "0").
     pub ttl: String,
+    /// Time-to-live for cached suggest graph structure (default: "1h").
+    /// The suggest graph changes less frequently than skill content.
+    pub suggest_ttl: String,
 }
 
 impl Default for CacheConfig {
@@ -108,6 +111,7 @@ impl Default for CacheConfig {
         Self {
             enabled: true,
             ttl: "5m".to_string(),
+            suggest_ttl: "1h".to_string(),
         }
     }
 }

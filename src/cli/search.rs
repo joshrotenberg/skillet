@@ -89,7 +89,12 @@ pub(crate) fn run_search(args: SearchArgs) -> ExitCode {
         if results.len() == 1 { "" } else { "s" }
     );
     for s in &results {
-        println!("  {}/{} v{}", s.owner, s.name, s.version);
+        let trust_label = s
+            .trust_tier
+            .as_deref()
+            .map(|t| format!(" [{t}]"))
+            .unwrap_or_default();
+        println!("  {}/{} v{}{trust_label}", s.owner, s.name, s.version);
         println!("    {}", s.description);
         if !s.categories.is_empty() {
             println!("    categories: {}", s.categories.join(", "));

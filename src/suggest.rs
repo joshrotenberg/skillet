@@ -268,6 +268,7 @@ impl SuggestWalker {
                     url = %entry.url,
                     description = entry.description.as_deref().unwrap_or(""),
                     depth,
+                    provenance = ?provenance,
                     "Following suggestion"
                 );
 
