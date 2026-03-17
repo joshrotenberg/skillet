@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-03-17
+
+### Bug Fixes
+
+- Show quickstart help when running skillet interactively ([#174](https://github.com/joshrotenberg/skillet/pull/174))
+- Scope `skillet list` to current project and global by default ([#176](https://github.com/joshrotenberg/skillet/pull/176))
+- Soften trust warning on install ([#177](https://github.com/joshrotenberg/skillet/pull/177))
+- Implicit serve when --repo/--remote/--http flags are provided ([#201](https://github.com/joshrotenberg/skillet/pull/201))
+- Add [source] prefer = main to prevent tag checkout on self ([#209](https://github.com/joshrotenberg/skillet/pull/209))
+
+### Documentation
+
+- Quote glob in README search examples ([#178](https://github.com/joshrotenberg/skillet/pull/178))
+- Update all docs and skills for prompt server architecture ([#200](https://github.com/joshrotenberg/skillet/pull/200))
+
+### Features
+
+- Hint at skill-repos on empty search results ([#179](https://github.com/joshrotenberg/skillet/pull/179))
+- Rewrite as skill network + MCP prompt server ([#196](https://github.com/joshrotenberg/skillet/pull/196))
+- Harden suggest graph with safety limits and trust tiers ([#197](https://github.com/joshrotenberg/skillet/pull/197))
+- Release model resolution for skill repos ([#198](https://github.com/joshrotenberg/skillet/pull/198))
+- Cache tiering, provenance polish, and public instance groundwork ([#199](https://github.com/joshrotenberg/skillet/pull/199))
+- Prompt arguments for section filtering, clean up dead suggest URLs ([#207](https://github.com/joshrotenberg/skillet/pull/207))
+- Auto-detect skills/ directory, expand suggest list ([#208](https://github.com/joshrotenberg/skillet/pull/208))
+
+### Refactor
+
+- Rename registry/ to skills/ ([#181](https://github.com/joshrotenberg/skillet/pull/181))
+- Replace static test fixtures with dynamic generation ([#183](https://github.com/joshrotenberg/skillet/pull/183))
+- Remove registry terminology, add [[suggest]] for discovery ([#184](https://github.com/joshrotenberg/skillet/pull/184))
+- Remove dead integrity/content_hash fields and stale URIs ([#202](https://github.com/joshrotenberg/skillet/pull/202))
+
+
+
 ## [0.4.0] - 2026-03-02
 
 ### Bug Fixes
