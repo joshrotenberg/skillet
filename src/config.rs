@@ -17,6 +17,46 @@ pub struct SkilletConfig {
     pub repos: ReposConfig,
     pub cache: CacheConfig,
     pub server: ServerConfig,
+    pub suggest: SuggestConfig,
+}
+
+/// `[suggest]` section: controls `[[suggest]]` graph traversal.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SuggestConfig {
+    /// Whether to follow suggestions at all.
+    pub enabled: bool,
+    /// Maximum BFS depth for following suggestion links.
+    pub max_depth: u32,
+    /// Maximum suggestions to follow from any single repo.
+    pub max_per_repo: usize,
+    /// Total maximum repos to clone via suggestions.
+    pub max_repos: usize,
+    /// Timeout for each git clone operation (e.g. "30s").
+    pub clone_timeout: String,
+    /// How long to remember a failed URL before retrying (e.g. "1h").
+    pub negative_cache_ttl: String,
+    /// Glob patterns for allowed URLs (empty = allow all).
+    #[serde(default)]
+    pub allow: Vec<String>,
+    /// Glob patterns for blocked URLs (checked before cloning).
+    #[serde(default)]
+    pub block: Vec<String>,
+}
+
+impl Default for SuggestConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            max_depth: 2,
+            max_per_repo: 5,
+            max_repos: 20,
+            clone_timeout: "30s".to_string(),
+            negative_cache_ttl: "1h".to_string(),
+            allow: Vec::new(),
+            block: Vec::new(),
+        }
+    }
 }
 
 /// `[server]` section: MCP server tool/resource exposure control.

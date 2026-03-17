@@ -16,6 +16,7 @@ pub mod repo;
 pub mod scaffold;
 pub mod search;
 pub mod state;
+pub mod suggest;
 
 #[cfg(any(test, feature = "testutil"))]
 pub mod testutil;

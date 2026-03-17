@@ -405,6 +405,8 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
         repo_path: None,
         versions,
         source: SkillSource::default(),
+        trust_tier: Default::default(),
+        discovered_via: Vec::new(),
     })
 }
 
@@ -775,6 +777,8 @@ description = "A skill collection"
             name: "test".to_string(),
             repo_path: None,
             source: SkillSource::default(),
+            trust_tier: Default::default(),
+            discovered_via: Vec::new(),
             versions: vec![
                 SkillVersion {
                     version: "1.0.0".to_string(),
