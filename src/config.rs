@@ -18,6 +18,27 @@ pub struct SkilletConfig {
     pub cache: CacheConfig,
     pub server: ServerConfig,
     pub suggest: SuggestConfig,
+    /// Consumer-side version pinning for specific repos.
+    #[serde(default)]
+    pub source: Vec<SourcePin>,
+}
+
+/// A `[[source]]` entry: consumer-side version pin for a specific repo.
+///
+/// ```toml
+/// [[source]]
+/// repo = "github.com/someone/skills"
+/// version = "v2.1.0"
+/// ```
+///
+/// If `version` is absent, skillet auto-detects (latest release or main).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SourcePin {
+    /// Repo identifier (canonical URL without scheme, e.g. "github.com/owner/repo").
+    pub repo: String,
+    /// Pinned git ref (tag, branch, or commit). None = auto-detect.
+    #[serde(default)]
+    pub version: Option<String>,
 }
 
 /// `[suggest]` section: controls `[[suggest]]` graph traversal.

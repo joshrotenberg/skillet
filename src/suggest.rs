@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::cache::{self, RepoSource};
-use crate::config::SuggestConfig;
+use crate::config::{SourcePin, SuggestConfig};
 use crate::state::{SkillIndex, TrustTier};
-use crate::{git, index, project};
+use crate::{git, index, project, resolve};
 
 /// Normalize a git URL for deduplication.
 ///
@@ -127,6 +127,7 @@ pub struct SuggestWalker {
     visited: HashSet<String>,
     negative_cache: NegativeCache,
     total_cloned: usize,
+    consumer_pins: Vec<SourcePin>,
 }
 
 impl SuggestWalker {
@@ -137,6 +138,7 @@ impl SuggestWalker {
         cache_enabled: bool,
         cache_ttl: Duration,
         seed_urls: &[String],
+        consumer_pins: Vec<SourcePin>,
     ) -> Self {
         let neg_ttl = crate::repo::parse_duration(&config.negative_cache_ttl)
             .unwrap_or(Duration::from_secs(3600));
@@ -151,6 +153,7 @@ impl SuggestWalker {
             visited,
             negative_cache: NegativeCache::new(neg_ttl),
             total_cloned: 0,
+            consumer_pins,
         }
     }
 
@@ -281,6 +284,17 @@ impl SuggestWalker {
                     tracing::warn!(url = %entry.url, error = %e, "Failed to clone suggested repo");
                     self.negative_cache.record_failure(&canonical);
                     continue;
+                }
+
+                // Resolve release model: checkout appropriate tag/ref
+                if let Err(e) =
+                    resolve::resolve_and_checkout(&target, &entry.url, &self.consumer_pins)
+                {
+                    tracing::warn!(
+                        url = %entry.url,
+                        error = %e,
+                        "Failed to resolve release ref, using default branch"
+                    );
                 }
 
                 self.total_cloned += 1;
@@ -517,6 +531,7 @@ mod tests {
                 "https://github.com/a/b.git".to_string(),
                 "git@github.com:c/d.git".to_string(),
             ],
+            vec![],
         );
 
         assert!(walker.visited.contains("https://github.com/a/b"));

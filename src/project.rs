@@ -32,6 +32,26 @@ pub struct SkilletToml {
     /// Suggested repos for decentralized discovery
     #[serde(default)]
     pub suggest: Vec<SuggestEntry>,
+
+    /// Author-side source preference for release model
+    #[serde(default)]
+    pub source: Option<SourceSection>,
+}
+
+/// `[source]` section in `skillet.toml`: author-side release model preference.
+///
+/// Controls which git ref skillet should use when serving this repo's skills.
+/// If absent, skillet auto-detects: latest release tag if available, otherwise main.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SourceSection {
+    /// Preferred ref strategy: `"release"`, `"main"`, or a glob like `"tag:v*"`.
+    /// Default: `"release"` (use latest release tag, fall back to main).
+    #[serde(default = "default_prefer")]
+    pub prefer: String,
+}
+
+fn default_prefer() -> String {
+    "release".to_string()
 }
 
 /// A suggested repo that this repo recommends following.
