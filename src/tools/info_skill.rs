@@ -111,23 +111,6 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     output.push_str(&format!("**Published:** {published}\n"));
                 }
 
-                // Content hash
-                if let Some(ref hash) = latest.content_hash {
-                    let display = if hash.len() > 17 {
-                        format!("{}...", &hash[..17])
-                    } else {
-                        hash.clone()
-                    };
-                    output.push_str(&format!("**Content hash:** {display}\n"));
-                }
-
-                // Integrity
-                match latest.integrity_ok {
-                    Some(true) => output.push_str("**Integrity:** verified\n"),
-                    Some(false) => output.push_str("**Integrity:** MISMATCH\n"),
-                    None => {}
-                }
-
                 // Version history
                 let available: Vec<&str> = entry
                     .versions
@@ -144,10 +127,24 @@ pub fn build(state: Arc<AppState>) -> Tool {
                     output.push_str(&format!("**Repo path:** {rpath}\n"));
                 }
 
-                // Source label for local skills
+                // Source label for embedded skills
                 if let Some(label) = entry.source.label() {
                     output.push_str(&format!("**Source:** {label}\n"));
                 }
+
+                // Trust tier and provenance
+                if entry.trust_tier != skillet_mcp::state::TrustTier::Direct {
+                    output.push_str(&format!("**Trust:** {}\n", entry.trust_tier));
+                    if !entry.discovered_via.is_empty() {
+                        output.push_str(&format!(
+                            "**Discovered via:** {}\n",
+                            entry.discovered_via.join(" -> ")
+                        ));
+                    }
+                }
+
+                // Prompt name for agent use
+                output.push_str(&format!("\n**Prompt:** `{}_{}`\n", input.owner, input.name));
 
                 Ok(CallToolResult::text(output))
             },

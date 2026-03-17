@@ -159,8 +159,6 @@ mod tests {
                 files: HashMap::new(),
                 published: None,
                 has_content: true,
-                content_hash: None,
-                integrity_ok: None,
             }],
         }
     }

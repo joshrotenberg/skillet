@@ -103,13 +103,6 @@ pub enum SkillSource {
     #[default]
     #[serde(alias = "Registry")]
     Repo,
-    /// Auto-discovered from a local agent skills directory
-    Local {
-        /// Agent platform (e.g. "claude", "agents")
-        platform: String,
-        /// Absolute path to the skill directory on disk
-        path: PathBuf,
-    },
     /// Embedded in a project via `skillet.toml`
     Embedded {
         /// Project name from the manifest
@@ -124,7 +117,6 @@ impl SkillSource {
     pub fn label(&self) -> Option<String> {
         match self {
             Self::Repo => None,
-            Self::Local { platform, .. } => Some(format!("local ({platform})")),
             Self::Embedded { project, .. } => Some(format!("embedded ({project})")),
         }
     }
@@ -133,7 +125,7 @@ impl SkillSource {
     pub fn path(&self) -> Option<&Path> {
         match self {
             Self::Repo => None,
-            Self::Local { path, .. } | Self::Embedded { path, .. } => Some(path),
+            Self::Embedded { path, .. } => Some(path),
         }
     }
 }
@@ -208,11 +200,6 @@ pub struct SkillVersion {
     /// Whether this version's content is loaded from disk.
     /// Historical versions listed in versions.toml have `has_content = false`.
     pub has_content: bool,
-    /// Computed composite content hash (SHA256 of all files)
-    pub content_hash: Option<String>,
-    /// Integrity verification result: None if no manifest, Some(true) if
-    /// verified, Some(false) if mismatch detected
-    pub integrity_ok: Option<bool>,
 }
 
 /// Deserialized versions.toml manifest
@@ -328,12 +315,6 @@ pub struct SkillSummary {
     pub version_count: usize,
     /// All available (non-yanked) version strings, oldest first
     pub available_versions: Vec<String>,
-    /// Composite content hash of the latest version
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub content_hash: Option<String>,
-    /// Integrity verification status: "verified", "failed", or absent
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub integrity: Option<String>,
     /// Source label for display (e.g. "local (claude)")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_label: Option<String>,
@@ -359,12 +340,6 @@ impl SkillSummary {
             .filter(|v| !v.yanked)
             .map(|v| v.version.clone())
             .collect();
-        let integrity = match v.integrity_ok {
-            Some(true) => Some("verified".to_string()),
-            Some(false) => Some("failed".to_string()),
-            None => None,
-        };
-
         Some(Self {
             owner: entry.owner.clone(),
             name: entry.name.clone(),
@@ -380,8 +355,6 @@ impl SkillSummary {
             published: v.published.clone(),
             version_count: entry.versions.len(),
             available_versions,
-            content_hash: v.content_hash.clone(),
-            integrity,
             source_label: entry.source.label(),
             trust_tier: match entry.trust_tier {
                 TrustTier::Direct => None,
@@ -419,8 +392,6 @@ mod tests {
             files: HashMap::new(),
             published: None,
             has_content: true,
-            content_hash: None,
-            integrity_ok: None,
         }
     }
 
@@ -611,15 +582,6 @@ mod tests {
     }
 
     #[test]
-    fn source_local_label() {
-        let source = SkillSource::Local {
-            platform: "claude".into(),
-            path: PathBuf::from("/tmp/skills/test"),
-        };
-        assert_eq!(source.label(), Some("local (claude)".into()));
-    }
-
-    #[test]
     fn source_embedded_label() {
         let source = SkillSource::Embedded {
             project: "my-tool".into(),
@@ -631,16 +593,6 @@ mod tests {
     #[test]
     fn source_repo_path_is_none() {
         assert!(SkillSource::Repo.path().is_none());
-    }
-
-    #[test]
-    fn source_local_path() {
-        let p = PathBuf::from("/tmp/skills/test");
-        let source = SkillSource::Local {
-            platform: "claude".into(),
-            path: p.clone(),
-        };
-        assert_eq!(source.path(), Some(p.as_path()));
     }
 
     #[test]
@@ -733,39 +685,6 @@ mod tests {
     fn summary_from_entry_none_when_all_yanked() {
         let entry = make_entry("acme", "tool", vec![make_version("0.1.0", "yanked", true)]);
         assert!(SkillSummary::from_entry(&entry).is_none());
-    }
-
-    #[test]
-    fn summary_integrity_verified() {
-        let mut version = make_version("1.0.0", "verified", false);
-        version.integrity_ok = Some(true);
-        let entry = make_entry("acme", "tool", vec![version]);
-        let summary = SkillSummary::from_entry(&entry).unwrap();
-        assert_eq!(summary.integrity, Some("verified".into()));
-    }
-
-    #[test]
-    fn summary_integrity_failed() {
-        let mut version = make_version("1.0.0", "bad", false);
-        version.integrity_ok = Some(false);
-        let entry = make_entry("acme", "tool", vec![version]);
-        let summary = SkillSummary::from_entry(&entry).unwrap();
-        assert_eq!(summary.integrity, Some("failed".into()));
-    }
-
-    #[test]
-    fn summary_source_label_for_local() {
-        let mut entry = make_entry(
-            "acme",
-            "tool",
-            vec![make_version("1.0.0", "local skill", false)],
-        );
-        entry.source = SkillSource::Local {
-            platform: "claude".into(),
-            path: PathBuf::from("/tmp/skills/tool"),
-        };
-        let summary = SkillSummary::from_entry(&entry).unwrap();
-        assert_eq!(summary.source_label, Some("local (claude)".into()));
     }
 
     // -- ServerConfig default --

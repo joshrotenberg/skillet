@@ -71,7 +71,6 @@ impl TestRepo {
         let d = skill_dir(root, "acme/git-conventions");
         write(d.join("skill.toml"), GIT_CONVENTIONS_SKILL_TOML);
         write(d.join("SKILL.md"), GIT_CONVENTIONS_SKILL_MD);
-        write(d.join("MANIFEST.sha256"), GIT_CONVENTIONS_MANIFEST);
 
         // github-actions (with assets)
         let d = skill_dir(root, "acme/github-actions");
@@ -609,9 +608,7 @@ discovery index, content storage, MCP server.
 
 - AppState with RwLock for concurrent reads
 - tower-mcp Tool Pattern with ToolBuilder and extractors
-- Resource Template Pattern with URI templates
-
-For deeper reference, fetch `skillet://files/joshrotenberg/skillet-dev/references/ARCHITECTURE.md`.
+- Skills served as MCP prompts via DynamicPromptRegistry
 "#;
 
 const ARCHITECTURE_MD: &str = r#"# Skillet Architecture Reference
@@ -896,12 +893,6 @@ Breaking changes: use `!` after type -- `feat!: remove legacy API`
 - Include a test plan
 - Request review from relevant code owners
 "#;
-
-// Deliberately corrupted manifest (all zeroes)
-const GIT_CONVENTIONS_MANIFEST: &str = "\
-sha256:0000000000000000000000000000000000000000000000000000000000000000  *\n\
-sha256:0000000000000000000000000000000000000000000000000000000000000000  SKILL.md\n\
-sha256:0000000000000000000000000000000000000000000000000000000000000000  skill.toml\n";
 
 // ── acme/github-actions ─────────────────────────────────────────────────
 

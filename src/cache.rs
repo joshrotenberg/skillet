@@ -256,8 +256,6 @@ mod tests {
                 files: HashMap::new(),
                 published: None,
                 has_content: true,
-                content_hash: None,
-                integrity_ok: None,
             }],
         };
 
@@ -496,8 +494,6 @@ mod tests {
                 files,
                 published: Some("2025-01-01T00:00:00Z".to_string()),
                 has_content: true,
-                content_hash: Some("abc123".to_string()),
-                integrity_ok: Some(true),
             }],
         };
 
@@ -518,7 +514,5 @@ mod tests {
             "#!/bin/bash\necho hello"
         );
         assert_eq!(v.published, Some("2025-01-01T00:00:00Z".to_string()));
-        assert_eq!(v.content_hash, Some("abc123".to_string()));
-        assert_eq!(v.integrity_ok, Some(true));
     }
 }

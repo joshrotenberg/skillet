@@ -394,8 +394,6 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
             files,
             published: None,
             has_content: true,
-            content_hash: None,
-            integrity_ok: None,
         }]
     };
 
@@ -479,8 +477,6 @@ fn load_versions_manifest(
                 files: files.clone(),
                 published: Some(record.published),
                 has_content: true,
-                content_hash: None,
-                integrity_ok: None,
             });
         } else {
             // Historical version: placeholder metadata, no content
@@ -506,8 +502,6 @@ fn load_versions_manifest(
                 files: std::collections::HashMap::new(),
                 published: Some(record.published),
                 has_content: false,
-                content_hash: None,
-                integrity_ok: None,
             });
         }
     }
@@ -801,8 +795,6 @@ description = "A skill collection"
                     files: std::collections::HashMap::new(),
                     published: Some("2026-01-01T00:00:00Z".to_string()),
                     has_content: false,
-                    content_hash: None,
-                    integrity_ok: None,
                 },
                 SkillVersion {
                     version: "2.0.0".to_string(),
@@ -825,8 +817,6 @@ description = "A skill collection"
                     files: std::collections::HashMap::new(),
                     published: Some("2026-02-01T00:00:00Z".to_string()),
                     has_content: true,
-                    content_hash: None,
-                    integrity_ok: None,
                 },
             ],
         };
