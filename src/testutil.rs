@@ -3,10 +3,7 @@
 //! Provides [`TestRepo`] which builds test registries programmatically in temp
 //! directories, replacing the static `test-repo/` and `test-npm-repo/` fixtures.
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-
-use crate::integrity;
 
 /// A dynamically generated test repository backed by a temp directory.
 pub struct TestRepo {
@@ -39,16 +36,7 @@ impl TestRepo {
         write(d.join("skill.toml"), CODE_REVIEW_SKILL_TOML);
         write(d.join("SKILL.md"), CODE_REVIEW_SKILL_MD);
         write(d.join("versions.toml"), CODE_REVIEW_VERSIONS_TOML);
-        // Generate a valid manifest dynamically
-        let hashes = integrity::compute_hashes(
-            CODE_REVIEW_SKILL_TOML,
-            CODE_REVIEW_SKILL_MD,
-            &HashMap::new(),
-        );
-        write(
-            d.join("MANIFEST.sha256"),
-            &integrity::format_manifest(&hashes),
-        );
+        // MANIFEST.sha256 no longer used (integrity checking removed)
 
         // security-audit (with extra files)
         let d = skill_dir(root, "joshrotenberg/security-audit");

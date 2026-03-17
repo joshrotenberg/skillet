@@ -1,8 +1,4 @@
 //! Consolidated error types for the skillet library.
-//!
-//! All library modules use `crate::error::{Error, Result}`. The binary
-//! crate (`main.rs`) and the private `discover::build_local_entry` helper
-//! still use `anyhow` where appropriate.
 
 use std::path::PathBuf;
 
@@ -26,64 +22,6 @@ pub enum Error {
     #[error("{0}")]
     Config(String),
 
-    // -- Manifest --
-    #[error("failed to read manifest at {path}: {source}")]
-    ManifestRead {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to parse manifest at {path}: {source}")]
-    ManifestParse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-    #[error("failed to write manifest to {path}: {source}")]
-    ManifestWrite {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to serialize manifest: {0}")]
-    ManifestSerialize(toml::ser::Error),
-
-    // -- Trust --
-    #[error("failed to read trust state at {path}: {source}")]
-    TrustRead {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to parse trust state at {path}: {source}")]
-    TrustParse {
-        path: PathBuf,
-        source: toml::de::Error,
-    },
-    #[error("failed to write trust state to {path}: {source}")]
-    TrustWrite {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to serialize trust state: {0}")]
-    TrustSerialize(toml::ser::Error),
-
-    // -- Install --
-    #[error("failed to create directory {path}: {source}")]
-    CreateDir {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to write {path}: {source}")]
-    WriteFile {
-        path: PathBuf,
-        source: std::io::Error,
-    },
-    #[error("failed to resolve current directory: {0}")]
-    CurrentDir(std::io::Error),
-
-    // -- Integrity --
-    #[error("invalid manifest line (expected two-space separator): {line}")]
-    ManifestFormatError { line: String },
-    #[error("MANIFEST.sha256 missing composite hash")]
-    ManifestMissingComposite,
-
     // -- Scaffold --
     #[error("{0}")]
     Scaffold(String),
@@ -95,10 +33,6 @@ pub enum Error {
     // -- Repo --
     #[error("invalid duration: {0}")]
     InvalidDuration(String),
-
-    // -- Validate --
-    #[error("validation error: {0}")]
-    Validation(String),
 
     // -- Index --
     #[error("failed to load skill at {path}: {reason}")]
