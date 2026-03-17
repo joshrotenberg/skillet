@@ -9,6 +9,9 @@ tags = ["mcp", "skills", "ai-agents"]
 name = "Josh Rotenberg"
 github = "joshrotenberg"
 
+[source]
+prefer = "main"
+
 [skills]
 path = "skills"
 
