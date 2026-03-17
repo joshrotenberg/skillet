@@ -75,6 +75,81 @@ pub fn head(repo_path: &Path) -> crate::error::Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
+/// List tags in a local clone, sorted by version (latest last).
+///
+/// Returns tag names (e.g. `["v0.1.0", "v0.2.0", "v1.0.0"]`).
+/// Returns an empty vec if the repo has no tags.
+pub fn list_tags(repo_path: &Path) -> crate::error::Result<Vec<String>> {
+    let output = Command::new("git")
+        .args(["tag", "--list", "--sort=version:refname"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::Io {
+            context: "failed to run git tag".to_string(),
+            source: e,
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "tag --list".to_string(),
+            stderr,
+        });
+    }
+
+    let tags: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect();
+
+    Ok(tags)
+}
+
+/// Fetch tags from the remote (needed for shallow clones).
+pub fn fetch_tags(repo_path: &Path) -> crate::error::Result<()> {
+    let output = Command::new("git")
+        .args(["fetch", "--tags", "--quiet"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::Io {
+            context: "failed to run git fetch --tags".to_string(),
+            source: e,
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: "fetch --tags".to_string(),
+            stderr,
+        });
+    }
+
+    Ok(())
+}
+
+/// Checkout a specific ref (tag, branch, or commit).
+pub fn checkout(repo_path: &Path, ref_name: &str) -> crate::error::Result<()> {
+    let output = Command::new("git")
+        .args(["checkout", ref_name, "--quiet"])
+        .current_dir(repo_path)
+        .output()
+        .map_err(|e| Error::Io {
+            context: format!("failed to run git checkout {ref_name}"),
+            source: e,
+        })?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        return Err(Error::Git {
+            operation: format!("checkout {ref_name}"),
+            stderr,
+        });
+    }
+
+    Ok(())
+}
+
 /// Clone if the target doesn't exist, otherwise pull.
 pub fn clone_or_pull(url: &str, target: &Path) -> crate::error::Result<()> {
     if target.join(".git").exists() {
@@ -147,7 +222,7 @@ pub fn clone_or_pull_with_timeout(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::process::Command;
     use tempfile::TempDir;
@@ -161,6 +236,11 @@ mod tests {
             .output()
             .unwrap();
         dir
+    }
+
+    /// Public version for use by other test modules.
+    pub(crate) fn make_repo_with_commit_pub() -> TempDir {
+        make_repo_with_commit()
     }
 
     /// Create a git repo with an initial commit and return its temp directory.

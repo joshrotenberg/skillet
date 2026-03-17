@@ -162,6 +162,16 @@ pub fn load_repos(
             std::fs::create_dir_all(parent)?;
         }
         git::clone_or_pull(url, &target)?;
+
+        // Resolve release model: checkout appropriate tag/ref
+        if let Err(e) = crate::resolve::resolve_and_checkout(&target, url, &config.source) {
+            tracing::warn!(
+                url,
+                error = %e,
+                "Failed to resolve release ref, using default branch"
+            );
+        }
+
         let path = match subdir {
             Some(sub) => target.join(sub),
             None if *url == DEFAULT_REPO_URL => target.join(DEFAULT_REPO_SUBDIR),
@@ -195,6 +205,7 @@ pub fn load_repos(
             cache_enabled,
             cache_ttl,
             &seed_urls,
+            config.source.clone(),
         );
         let seed_paths = repo_paths.clone();
         walker.walk(

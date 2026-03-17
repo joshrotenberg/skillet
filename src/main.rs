@@ -375,6 +375,7 @@ async fn run_serve(args: ServeArgs) -> ExitCode {
 
 async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     let cache_base = args.cache_dir.clone().unwrap_or_else(default_cache_dir);
+    let cli_config = config::load_config().unwrap_or_default();
     let mut repo_paths = Vec::new();
 
     // Resolve local repos
@@ -394,6 +395,13 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
             std::fs::create_dir_all(parent)?;
         }
         git::clone_or_pull(url, &target)?;
+
+        // Resolve release model: checkout appropriate tag/ref
+        if let Err(e) = skillet_mcp::resolve::resolve_and_checkout(&target, url, &cli_config.source)
+        {
+            tracing::warn!(url, error = %e, "Failed to resolve release ref, using default branch");
+        }
+
         let path = match &args.subdir {
             Some(sub) => target.join(sub),
             None => target,
@@ -421,9 +429,6 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
     }
 
     tracing::info!(count = repo_paths.len(), "Starting skillet server");
-
-    // Load CLI config early (used for capabilities)
-    let cli_config = config::load_config().unwrap_or_default();
 
     // Load and merge all repos
     let mut merged_index = state::SkillIndex::default();
@@ -453,6 +458,7 @@ async fn run_serve_inner(args: ServeArgs) -> Result<(), tower_mcp::BoxError> {
             cache_enabled,
             cache_ttl,
             &seed_urls,
+            cli_config.source.clone(),
         );
         let seed_paths = repo_paths.clone();
         walker.walk(

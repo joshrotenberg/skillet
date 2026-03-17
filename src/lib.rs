@@ -13,6 +13,7 @@ pub mod index;
 pub mod project;
 pub mod prompts;
 pub mod repo;
+pub mod resolve;
 pub mod scaffold;
 pub mod search;
 pub mod state;
