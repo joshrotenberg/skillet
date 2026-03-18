@@ -53,6 +53,14 @@ enum Command {
     Info(InfoArgs),
     /// Manage configured repos
     Repo(RepoCommand),
+    /// Discover skill repos on GitHub
+    Discover(DiscoverArgs),
+}
+
+#[derive(clap::Args, Debug)]
+struct DiscoverArgs {
+    /// Optional search query to narrow results
+    query: Option<String>,
 }
 
 #[derive(clap::Args, Debug, Clone)]
@@ -231,6 +239,7 @@ async fn main() -> ExitCode {
         Some(Command::Categories(args)) => cli::search::run_categories(args),
         Some(Command::Info(args)) => cli::search::run_info(args),
         Some(Command::Repo(args)) => cli::repo::run_repo(args),
+        Some(Command::Discover(args)) => run_discover(args),
         Some(Command::Serve(args)) => run_serve(args).await,
         None if interactive_tty => {
             eprintln!("Skillet - skill discovery for AI agents\n");
@@ -248,7 +257,7 @@ async fn main() -> ExitCode {
 }
 
 /// All known tool short names.
-const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "info"];
+const ALL_TOOL_NAMES: &[&str] = &["search", "categories", "owner", "info", "annotate"];
 
 /// Resolved set of capabilities to expose from the MCP server.
 struct ServerCapabilities {
@@ -297,6 +306,9 @@ fn build_router(
     if caps.tools.contains("info") {
         router = router.tool(tools::info_skill::build(state.clone()));
     }
+    if caps.tools.contains("annotate") {
+        router = router.tool(tools::annotate_skill::build());
+    }
 
     // Build dynamic instructions based on exposed capabilities
     router = router.instructions(build_instructions(caps));
@@ -330,6 +342,11 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
             "- info_skill: Get detailed information about a specific skill (version, author, tags, files, etc.)",
         );
     }
+    if caps.tools.contains("annotate") {
+        tool_lines.push(
+            "- annotate_skill: Attach a persistent note to a skill (records gaps, tips, corrections)",
+        );
+    }
     if !tool_lines.is_empty() {
         text.push_str("Tools:\n");
         for line in &tool_lines {
@@ -347,6 +364,40 @@ fn build_instructions(caps: &ServerCapabilities) -> String {
     );
 
     text
+}
+
+/// Run the `discover` subcommand.
+fn run_discover(args: DiscoverArgs) -> ExitCode {
+    let repos = match skillet_mcp::discover::search_github(args.query.as_deref()) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("Error: {e}");
+            eprintln!("\nMake sure `gh` CLI is installed and authenticated.");
+            return ExitCode::from(1);
+        }
+    };
+
+    if repos.is_empty() {
+        println!("No skill repos found on GitHub.");
+        return ExitCode::SUCCESS;
+    }
+
+    println!(
+        "Found {} repo{} with skillet.toml:\n",
+        repos.len(),
+        if repos.len() == 1 { "" } else { "s" }
+    );
+
+    for repo in &repos {
+        println!("  {}", repo.full_name);
+        if !repo.description.is_empty() {
+            println!("    {}", repo.description);
+        }
+        println!("    skillet repo add {}", repo.clone_url);
+        println!();
+    }
+
+    ExitCode::SUCCESS
 }
 
 /// Run the MCP server (default behavior / `serve` subcommand).

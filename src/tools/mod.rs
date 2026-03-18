@@ -1,3 +1,4 @@
+pub mod annotate_skill;
 pub mod info_skill;
 pub mod list_categories;
 pub mod list_skills_by_owner;
