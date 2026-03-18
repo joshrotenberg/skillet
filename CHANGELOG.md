@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-03-18
+
+### Features
+
+- Skill annotations and GitHub repo discovery ([#214](https://github.com/joshrotenberg/skillet/pull/214))
+
+### Miscellaneous Tasks
+
+- Remove [source] prefer = main workaround ([#213](https://github.com/joshrotenberg/skillet/pull/213))
+
+
+
 ## [0.5.0] - 2026-03-17
 
 ### Bug Fixes
