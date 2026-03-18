@@ -146,6 +146,15 @@ pub fn build(state: Arc<AppState>) -> Tool {
                 // Prompt name for agent use
                 output.push_str(&format!("\n**Prompt:** `{}_{}`\n", input.owner, input.name));
 
+                // Annotations
+                let annotations = skillet_mcp::annotations::get(&input.owner, &input.name);
+                if !annotations.is_empty() {
+                    output.push_str(&format!("\n**Annotations ({}):**\n", annotations.len()));
+                    for ann in &annotations {
+                        output.push_str(&format!("- {} ({})\n", ann.note, ann.created_at));
+                    }
+                }
+
                 Ok(CallToolResult::text(output))
             },
         )

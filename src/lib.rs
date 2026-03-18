@@ -4,9 +4,11 @@
 //! and serving skills from repos as MCP prompts. The binary crate
 //! adds the CLI (clap) and MCP server (tower-mcp) on top.
 
+pub mod annotations;
 pub mod bm25;
 pub mod cache;
 pub mod config;
+pub mod discover;
 pub mod error;
 pub mod git;
 pub mod index;
