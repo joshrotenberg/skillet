@@ -89,10 +89,12 @@ Or with Docker (zero install):
 }
 ```
 
-That's it. Skillet auto-discovers the
+That's it. Skillet auto-discovers skills from the
 [official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
-and serves all skills as MCP prompts. Your agent now has access to
-`search_skills` and the full [MCP interface](#mcp-interface).
+plus 14 community repos (Anthropic, Vercel, Firebase, Supabase, Google
+Gemini, Microsoft, and more) via the [suggest graph](#decentralized-discovery-suggest-graph).
+Your agent now has access to `search_skills` and the full
+[MCP interface](#mcp-interface).
 
 For custom or team repos, add `--remote` or `--repo` args:
 
@@ -213,8 +215,11 @@ skillet search rust \
 
 Repos can suggest other repos via `[[suggest]]` entries in their
 `skillet.toml`. Skillet follows these on startup to build a discovery
-graph -- no central authority needed. The official repo suggests known
-community repos so you get broad coverage out of the box.
+graph -- no central authority needed. The official repo suggests 14
+community and vendor repos (Anthropic, Vercel, Firebase, Supabase,
+Google Gemini, Microsoft, Redis, Callstack, Kepano, TerminalSkills,
+Softaworks, Anthony Fu, Daymade, and more) so you get broad coverage
+out of the box.
 
 ```toml
 # In any repo's skillet.toml
@@ -298,16 +303,30 @@ skillet init --multi             # multi-skill directory
 
 ### Zero-config skill discovery
 
-Directories with only a `SKILL.md` (no `skill.toml`) are fully
-discoverable. Metadata is inferred automatically:
+Directories with only a `SKILL.md` are fully discoverable. YAML
+frontmatter in SKILL.md is the primary metadata source:
 
-- **name** from the directory name
-- **owner** from git remote, project authors, or parent directory
-- **version** defaults to `0.1.0`
-- **description** from the first non-heading line of SKILL.md
+```markdown
+---
+name: my-skill
+description: What this skill does
+version: 1.0.0
+trigger: When to activate this skill
+categories:
+  - development
+tags:
+  - rust
+  - testing
+---
 
-`skill.toml` adds richer metadata (categories, tags, compatibility)
-but is never required.
+## My Skill
+
+Instructions for the agent...
+```
+
+When frontmatter is absent, metadata is inferred automatically from the
+directory name, git remote, and SKILL.md content. `skill.toml` is
+supported as a legacy fallback but frontmatter is preferred.
 
 ### BM25 full-text search
 
@@ -351,13 +370,14 @@ fetch skill content as prompts.
 | `list_categories` | Browse all skill categories with counts |
 | `list_skills_by_owner` | List all skills by a specific publisher |
 | `info_skill` | Detailed information about a specific skill |
+| `annotate_skill` | Attach a persistent note to a skill |
 
 ### Prompts
 
 Every indexed skill is served as an MCP prompt via `prompts/list` and
 `prompts/get`. Prompt names are namespaced as `owner_skill-name` (e.g.
-`joshrotenberg_rust-dev`). The prompt description comes from skill.toml
-metadata and the prompt content is the full SKILL.md text.
+`joshrotenberg_rust-dev`). The prompt description comes from SKILL.md
+frontmatter and the prompt content is the full SKILL.md text.
 
 When the index refreshes (repo pull, filesystem watch, or cache
 expiration), prompts are synced automatically: new skills are registered,
@@ -448,59 +468,53 @@ version = "v2.1.0"
 
 ## Skill format
 
-A skill is a directory with a `SKILL.md` prompt. Add a `skill.toml`
-for richer metadata (categories, tags, compatibility). For local use
-or embedded projects, only `SKILL.md` is required -- metadata is
-inferred automatically.
+A skill is a directory with a `SKILL.md` file containing YAML
+frontmatter for metadata and markdown content for the prompt:
 
 ```
 owner/skill-name/
-  SKILL.md         # Agent-compatible prompt (required)
-  skill.toml       # Metadata for indexing and search (optional)
+  SKILL.md         # Prompt with YAML frontmatter (required)
   scripts/         # Optional executable scripts
   references/      # Optional reference docs
   assets/          # Optional templates, configs
 ```
 
-The `skill.toml` carries metadata for indexing and search:
+```markdown
+---
+name: rust-dev
+description: Rust development standards and conventions
+version: 2026.02.24
+trigger: Use when writing or reviewing Rust code
+license: MIT
+author: Josh Rotenberg
+categories:
+  - development
+  - rust
+tags:
+  - rust
+  - cargo
+  - clippy
+  - fmt
+  - testing
+---
 
-```toml
-[skill]
-name = "rust-dev"
-owner = "joshrotenberg"
-version = "2026.02.24"
-description = "Rust development standards and conventions"
-trigger = "Use when writing or reviewing Rust code"
-license = "MIT"
+## Rust Development Standards
 
-[skill.author]
-name = "Josh Rotenberg"
-github = "joshrotenberg"
-
-[skill.classification]
-categories = ["development", "rust"]
-tags = ["rust", "cargo", "clippy", "fmt", "testing"]
-
-[skill.compatibility]
-requires_tool_use = true
-requires_vision = false
-min_context_tokens = 4096
-required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
-verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
+### Pre-commit Checklist
+...
 ```
 
-The `SKILL.md` is the prompt itself -- fully compatible with the
+All frontmatter fields are optional -- skillet infers what it can from
+the directory name, git remote, and content. Fully compatible with the
 [Agent Skills specification](https://docs.anthropic.com/en/docs/claude-code/skills).
 
 ## Status
 
-v0.4.0. Skills are served as MCP prompts via `prompts/list` and
-`prompts/get`. The suggest graph provides decentralized discovery with
-hop-based trust tiers. Release model resolution respects author
+Skills are served as MCP prompts with YAML frontmatter as the primary
+metadata source. The suggest graph discovers skills across 14 default
+repos plus any you configure. Release model resolution respects author
 preferences and consumer pins. The CLI covers search, info, categories,
-init, and repo management. There is an
-[official repo](https://github.com/joshrotenberg/skillet/tree/main/skills)
-with skills across development, devops, and security categories.
+init, and repo management.
 
 See [open issues](https://github.com/joshrotenberg/skillet/issues) for
 what's next.
