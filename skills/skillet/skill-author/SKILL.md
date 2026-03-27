@@ -1,6 +1,19 @@
 ---
 name: skill-author
 description: Authoring skills for skillet. Covers the skill format, discovery via suggest, and project manifests.
+version: 2026.02.27
+trigger: Use when the user wants to create a new skill, validate a skillpack, or publish a skill to a registry
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - tools
+  - development
+tags:
+  - skillet
+  - skills
+  - authoring
+  - publishing
+  - validate
 ---
 
 ## Skill Authoring Guide
@@ -11,60 +24,42 @@ A skill is a directory with a required `SKILL.md` file:
 
 ```
 owner/skill-name/
-  SKILL.md         # the skill prompt (required)
-  skill.toml       # metadata for indexing (optional, inferred if absent)
+  SKILL.md         # the skill prompt with YAML frontmatter (required)
   scripts/         # optional executable scripts
   references/      # optional reference docs
   assets/          # optional templates, configs
 ```
 
-**Zero-config mode**: a directory with only `SKILL.md` is discoverable.
-Metadata (name, owner, version, description) is inferred from the directory
-name, git remote, and SKILL.md content. `skill.toml` adds explicit metadata
-for better search results.
-
-### skill.toml
-
-```toml
-[skill]
-name = "my-skill"
-owner = "myname"
-version = "2026.02.27"
-description = "What this skill does"
-trigger = "When to activate this skill"
-license = "MIT"
-
-[skill.author]
-name = "Your Name"
-github = "yourgithub"
-
-[skill.classification]
-categories = ["development"]
-tags = ["rust", "testing"]
-
-[skill.compatibility]
-requires_tool_use = true
-requires_vision = false
-min_context_tokens = 4096
-required_capabilities = ["shell_exec", "file_read"]
-required_mcp_servers = []
-verified_with = ["claude-opus-4-6"]
-```
-
 ### SKILL.md
 
-Agent Skills spec-compatible markdown. Optional YAML frontmatter:
+Agent Skills spec-compatible markdown with YAML frontmatter for metadata:
 
 ```markdown
 ---
 name: my-skill
-description: Short description for discovery.
+description: What this skill does and when to use it.
+version: 2026.02.27
+trigger: When to activate this skill
+license: MIT
+author: Your Name
+categories:
+  - development
+tags:
+  - rust
+  - testing
 ---
 
 ## My Skill
 
 Instructions for the agent...
 ```
+
+**Frontmatter fields**: `name`, `description`, `version`, `trigger`,
+`license`, `author`, `categories`, `tags`. All optional -- skillet infers
+what it can from the directory name, git remote, and content.
+
+**Zero-config mode**: a directory with only a bare `SKILL.md` (no
+frontmatter) is still discoverable. Frontmatter improves search results.
 
 ### Extra Files
 

@@ -31,9 +31,8 @@ impl TestRepo {
         write(d.join("SKILL.md"), RUST_DEV_SKILL_MD);
         write(d.join("versions.toml"), RUST_DEV_VERSIONS_TOML);
 
-        // code-review
+        // code-review (frontmatter-only, no skill.toml)
         let d = skill_dir(root, "joshrotenberg/code-review");
-        write(d.join("skill.toml"), CODE_REVIEW_SKILL_TOML);
         write(d.join("SKILL.md"), CODE_REVIEW_SKILL_MD);
         write(d.join("versions.toml"), CODE_REVIEW_VERSIONS_TOML);
 
@@ -67,9 +66,8 @@ impl TestRepo {
         write_extra(&d, "references/RUFF_CONFIG.md", RUFF_CONFIG_MD);
         write_extra(&d, "scripts/lint.sh", LINT_SH);
 
-        // git-conventions
+        // git-conventions (frontmatter-only, no skill.toml)
         let d = skill_dir(root, "acme/git-conventions");
-        write(d.join("skill.toml"), GIT_CONVENTIONS_SKILL_TOML);
         write(d.join("SKILL.md"), GIT_CONVENTIONS_SKILL_MD);
 
         // github-actions (with assets)
@@ -110,8 +108,8 @@ impl TestRepo {
 
         // ── skillet skills ──────────────────────────────────────────
 
+        // setup (frontmatter-only, no skill.toml)
         let d = skill_dir(root, "skillet/setup");
-        write(d.join("skill.toml"), SETUP_SKILL_TOML);
         write(d.join("SKILL.md"), SETUP_SKILL_MD);
 
         TestRepo { dir }
@@ -301,34 +299,21 @@ yanked = false
 
 // ── joshrotenberg/code-review ───────────────────────────────────────────
 
-const CODE_REVIEW_SKILL_TOML: &str = r#"[skill]
-name = "code-review"
-owner = "joshrotenberg"
-version = "1.0.0"
-description = "Structured code review methodology"
-trigger = "Use when reviewing code changes, PRs, or diffs"
-license = "MIT"
-
-[skill.author]
-name = "Josh Rotenberg"
-github = "joshrotenberg"
-
-[skill.classification]
-categories = ["development", "review"]
-tags = ["code-review", "pr", "quality", "best-practices"]
-
-[skill.compatibility]
-requires_tool_use = true
-requires_vision = false
-min_context_tokens = 8192
-required_capabilities = ["shell_exec", "file_read"]
-required_mcp_servers = []
-verified_with = ["claude-opus-4-6"]
-"#;
-
 const CODE_REVIEW_SKILL_MD: &str = r#"---
 name: code-review
 description: Structured code review methodology. Use when reviewing code changes, PRs, or diffs.
+version: 1.0.0
+trigger: Use when reviewing code changes, PRs, or diffs
+license: MIT
+author: Josh Rotenberg
+categories:
+  - development
+  - review
+tags:
+  - code-review
+  - pr
+  - quality
+  - best-practices
 ---
 
 ## Code Review Methodology
@@ -837,34 +822,21 @@ echo "All checks passed."
 
 // ── acme/git-conventions ────────────────────────────────────────────────
 
-const GIT_CONVENTIONS_SKILL_TOML: &str = r#"[skill]
-name = "git-conventions"
-owner = "acme"
-version = "1"
-description = "Git workflow conventions with conventional commits and branch naming"
-trigger = "Use when making git commits, creating branches, or managing PRs"
-license = "MIT"
-
-[skill.author]
-name = "Acme Corp"
-github = "acme"
-
-[skill.classification]
-categories = ["workflow", "git"]
-tags = ["git", "commits", "branches", "conventional-commits"]
-
-[skill.compatibility]
-requires_tool_use = true
-requires_vision = false
-min_context_tokens = 2048
-required_capabilities = ["shell_exec"]
-required_mcp_servers = []
-verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
-"#;
-
 const GIT_CONVENTIONS_SKILL_MD: &str = r#"---
 name: git-conventions
 description: Git workflow conventions with conventional commits and branch naming. Use when making git commits, creating branches, or managing PRs.
+version: 1
+trigger: Use when making git commits, creating branches, or managing PRs
+license: MIT
+author: Acme Corp
+categories:
+  - workflow
+  - git
+tags:
+  - git
+  - commits
+  - branches
+  - conventional-commits
 ---
 
 ## Git Conventions
@@ -1278,34 +1250,21 @@ paths:
 
 // ── skillet/setup ───────────────────────────────────────────────────────
 
-const SETUP_SKILL_TOML: &str = r#"[skill]
-name = "setup"
-owner = "skillet"
-version = "2026.02.24"
-description = "Set up and configure the Skillet skill discovery tool"
-trigger = "Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences"
-license = "MIT"
-
-[skill.author]
-name = "Skillet"
-github = "skillet"
-
-[skill.classification]
-categories = ["tools", "configuration"]
-tags = ["skillet", "skills", "setup", "mcp"]
-
-[skill.compatibility]
-requires_tool_use = true
-requires_vision = false
-min_context_tokens = 4096
-required_capabilities = ["shell_exec", "file_read", "file_write", "file_edit"]
-required_mcp_servers = []
-verified_with = ["claude-opus-4-6", "claude-sonnet-4-6"]
-"#;
-
 const SETUP_SKILL_MD: &str = r#"---
 name: setup
 description: Set up and configure the Skillet skill discovery tool. Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences.
+version: 2026.02.24
+trigger: Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences
+license: MIT
+author: Skillet
+categories:
+  - tools
+  - configuration
+tags:
+  - skillet
+  - skills
+  - setup
+  - mcp
 ---
 
 ## Skillet Setup

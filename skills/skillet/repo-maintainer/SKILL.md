@@ -1,6 +1,19 @@
 ---
 name: repo-maintainer
 description: Creating and maintaining skill repos. Covers setup, directory layout, PR review, multi-repo, and hosting.
+version: 2026.02.27
+trigger: Use when the user wants to create a skill repo, review skill PRs, or configure repo hosting
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - tools
+  - configuration
+tags:
+  - skillet
+  - repo
+  - maintenance
+  - hosting
+  - review
 ---
 
 ## Repo Maintainer Guide
@@ -27,19 +40,16 @@ This creates a git repo with:
 my-repo/
   skillet.toml          # repo config
   owner1/skill-a/       # flat: owner/name
-    skill.toml
     SKILL.md
   owner1/skill-b/
-    skill.toml
     SKILL.md
   owner2/tool/
-    skill.toml
     SKILL.md
 ```
 
 Nested paths are also supported (e.g. `acme/lang/java/maven-build/`).
-The skill's `owner` and `name` fields in `skill.toml` are authoritative;
-the directory path is for organization.
+The directory path determines the skill's owner and name. Metadata
+(description, tags, categories) comes from SKILL.md YAML frontmatter.
 
 ### Repo Configuration
 
@@ -68,8 +78,8 @@ refresh_interval = "10m"
 
 When contributors submit skills, review:
 
-1. **skill.toml**: valid fields, appropriate categories/tags, version format
-2. **SKILL.md**: clear instructions, no dangerous patterns
+1. **SKILL.md frontmatter**: valid fields, appropriate categories/tags, version format
+2. **SKILL.md content**: clear instructions, no dangerous patterns
 3. **Extra files**: scripts should be safe, references should be relevant
 
 ### npm-style Repository Bridging
