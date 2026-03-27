@@ -18,39 +18,30 @@ tags:
 ## External Skill Repositories
 
 Skillet can aggregate skills from any git repo that contains `SKILL.md`
-files. This is a curated list of high-quality external repositories that
-work as skillet remotes. None of these require `skill.toml` -- skillet's
-zero-config discovery handles them.
+files. The repos below are included as default `[[suggest]]` entries --
+skillet discovers them automatically on startup. No manual configuration
+needed.
 
-### How to add a repo
+### Adding additional repos
+
+If you need a repo that isn't in the default set:
 
 ```bash
 # As a CLI flag (one-time)
-skillet search react --remote https://github.com/vercel-labs/agent-skills.git --subdir skills
+skillet search react --remote https://github.com/org/skills.git --subdir skills
 
-# In MCP server config (persistent)
-{
-  "mcpServers": {
-    "skillet": {
-      "command": "skillet",
-      "args": [
-        "--remote", "https://github.com/vercel-labs/agent-skills.git",
-        "--subdir", "skills"
-      ]
-    }
-  }
-}
+# In config (persistent)
+```toml
+# ~/.config/skillet/config.toml
+[repos]
+remote = ["https://github.com/org/skills.git"]
 ```
-
-Most repos below use `--subdir skills` because the convention is to put
-skills under a `skills/` directory.
 
 ### When to suggest adding a repo
 
 If the user asks about a topic and `search_skills` returns no results,
-check this list. If there's a relevant repo, suggest adding it as a remote.
-The user only needs to add it once -- after that, all skills from the repo
-are searchable and installable.
+check this list for coverage gaps. The default suggest set covers most
+common development domains.
 
 ---
 
@@ -101,6 +92,18 @@ authoritative.
 - Skills: 3 (React Native best practices, upgrading, GitHub workflows)
 - Use when: React Native, mobile development, React Native upgrades
 
+**Microsoft -- Azure SDK and dev tools**
+- Repo: `https://github.com/microsoft/skills.git`
+- Subdir: `.github/plugins`
+- Skills: 170+ (Azure SDK for Rust/Python/Java/TypeScript/.NET, dev tools)
+- Use when: Azure services, Azure SDK, cloud development
+
+**Kepano -- Obsidian and PKM**
+- Repo: `https://github.com/kepano/obsidian-skills.git`
+- Subdir: `skills`
+- Skills: Obsidian note-taking, knowledge management
+- Use when: Obsidian, personal knowledge management, note-taking workflows
+
 ### Community collections
 
 Larger collections maintained by the community. Broader coverage, more
@@ -111,6 +114,12 @@ skills to discover.
 - Subdir: `skills`
 - Skills: 43 (architecture, API design, testing, documentation, planning, refactoring, security, DevOps, and more)
 - Use when: general development workflows, project planning, architecture decisions, documentation
+
+**Anthony Fu -- curated dev skills**
+- Repo: `https://github.com/antfu/skills.git`
+- Subdir: `skills`
+- Skills: curated development skills from a prolific open-source maintainer
+- Use when: frontend tooling, ESLint, Vite, Vue, TypeScript patterns
 
 **Daymade Claude Code Skills -- Claude Code productivity**
 - Repo: `https://github.com/daymade/claude-code-skills.git`
@@ -128,17 +137,21 @@ skills to discover.
 
 ### Quick reference
 
-| Repo | --subdir | Skills | Domain |
-|------|----------|--------|--------|
-| anthropics/skills | skills | 16 | docs, design, MCP |
-| vercel-labs/agent-skills | skills | 5 | React, Next.js |
-| firebase/agent-skills | skills | 7 | Firebase services |
-| supabase/agent-skills | skills | 1 | Supabase, Postgres |
-| google-gemini/gemini-skills | skills | 1 | Gemini API |
-| redis/agent-skills | skills | 1 | Redis |
-| callstackincubator/agent-skills | skills | 3 | React Native |
-| softaworks/agent-toolkit | skills | 43 | dev workflows |
-| daymade/claude-code-skills | (none) | 38 | Claude Code tools |
-| muratcankoylan/Agent-Skills-for-Context-Engineering | skills | 13 | context engineering |
+All repos below are included as default `[[suggest]]` entries.
 
-**Total: 128 skills across 10 repos, all usable with `skillet --remote`.**
+| Repo | Subdir | Domain |
+|------|--------|--------|
+| anthropics/skills | skills | docs, design, MCP, frontend |
+| vercel-labs/agent-skills | skills | React, Next.js |
+| firebase/agent-skills | skills | Firebase services |
+| supabase/agent-skills | skills | Supabase, Postgres |
+| google-gemini/gemini-skills | skills | Gemini API |
+| redis/agent-skills | skills | Redis |
+| callstackincubator/agent-skills | skills | React Native |
+| microsoft/skills | .github/plugins | Azure SDK, dev tools |
+| kepano/obsidian-skills | skills | Obsidian, PKM |
+| TerminalSkills/skills | (root) | 800+ tools/frameworks |
+| softaworks/agent-toolkit | skills | dev workflows |
+| antfu/skills | skills | frontend tooling |
+| daymade/claude-code-skills | (root) | Claude Code tools |
+| muratcankoylan/Agent-Skills-... | skills | context engineering |
