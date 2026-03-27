@@ -457,6 +457,184 @@ async fn http_invalid_json_returns_parse_error() {
     assert_eq!(code, -32700, "should return parse error code");
 }
 
+// ── list_categories / list_skills_by_owner ──────────────────────
+
+#[tokio::test]
+async fn http_list_categories() {
+    let port = free_port();
+    let _guard = ServerGuard(spawn_server(port));
+    wait_for_server(port).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let session_id = initialize(&client, &base).await;
+
+    let body = jsonrpc_request(
+        "tools/call",
+        serde_json::json!({
+            "name": "list_categories",
+            "arguments": {}
+        }),
+        20,
+    );
+    let resp = client
+        .post(&base)
+        .header("mcp-session-id", &session_id)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    let content = json["result"]["content"].as_array().expect("content array");
+    let text = content
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // The standard test repo has skills with categories
+    assert!(
+        text.contains("Skill Categories"),
+        "should have categories header: {text}"
+    );
+    assert!(
+        text.contains("development"),
+        "should list development category: {text}"
+    );
+}
+
+#[tokio::test]
+async fn http_list_skills_by_owner() {
+    let port = free_port();
+    let _guard = ServerGuard(spawn_server(port));
+    wait_for_server(port).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let session_id = initialize(&client, &base).await;
+
+    let body = jsonrpc_request(
+        "tools/call",
+        serde_json::json!({
+            "name": "list_skills_by_owner",
+            "arguments": { "owner": "joshrotenberg" }
+        }),
+        21,
+    );
+    let resp = client
+        .post(&base)
+        .header("mcp-session-id", &session_id)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    let content = json["result"]["content"].as_array().expect("content array");
+    let text = content
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(text.contains("rust-dev"), "should list rust-dev: {text}");
+    assert!(
+        text.contains("code-review"),
+        "should list code-review: {text}"
+    );
+}
+
+#[tokio::test]
+async fn http_list_skills_by_owner_not_found() {
+    let port = free_port();
+    let _guard = ServerGuard(spawn_server(port));
+    wait_for_server(port).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let session_id = initialize(&client, &base).await;
+
+    let body = jsonrpc_request(
+        "tools/call",
+        serde_json::json!({
+            "name": "list_skills_by_owner",
+            "arguments": { "owner": "nonexistent-owner-xyz" }
+        }),
+        22,
+    );
+    let resp = client
+        .post(&base)
+        .header("mcp-session-id", &session_id)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    let content = json["result"]["content"].as_array().expect("content array");
+    let text = content
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        text.contains("No skills found"),
+        "should say no skills found: {text}"
+    );
+}
+
+// ── annotate_skill ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn http_annotate_skill() {
+    let port = free_port();
+    let _guard = ServerGuard(spawn_server(port));
+    wait_for_server(port).await;
+
+    let client = reqwest::Client::new();
+    let base = format!("http://127.0.0.1:{port}");
+    let session_id = initialize(&client, &base).await;
+
+    let body = jsonrpc_request(
+        "tools/call",
+        serde_json::json!({
+            "name": "annotate_skill",
+            "arguments": {
+                "owner": "joshrotenberg",
+                "name": "rust-dev",
+                "note": "Great skill for Rust projects"
+            }
+        }),
+        30,
+    );
+    let resp = client
+        .post(&base)
+        .header("mcp-session-id", &session_id)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+
+    assert_eq!(resp.status(), 200);
+    let json: serde_json::Value = resp.json().await.unwrap();
+    let content = json["result"]["content"].as_array().expect("content array");
+    let text = content
+        .iter()
+        .filter_map(|c| c["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    assert!(
+        text.contains("Annotated"),
+        "should confirm annotation: {text}"
+    );
+}
+
 // ── Multiple sessions ───────────────────────────────────────────
 
 #[tokio::test]

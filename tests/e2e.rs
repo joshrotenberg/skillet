@@ -503,6 +503,129 @@ fn mcp_prompts_from_suggest_graph() {
     let _ = child.wait();
 }
 
+// ── Auto-detect skills/ without skillet.toml ────────────────────
+
+/// A local repo with skills/ directory and no skillet.toml or git remote
+/// still discovers skills with owner inferred from directory name.
+#[test]
+fn skills_dir_auto_detect_local_repo() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    write_test_config(&home);
+
+    // Create a repo with skills/ but NO skillet.toml
+    let repo = make_git_repo(tmp.path(), "my-tools");
+    add_flat_skill(&repo, "lint-helper", "Linting automation");
+    add_flat_skill(&repo, "test-runner", "Test execution helper");
+    // No skillet.toml written -- pure auto-detect
+    commit_all(&repo, "add skills");
+
+    // Search via --repo (local path, not remote)
+    let output = skillet()
+        .args(["search", "*", "--repo", repo.to_str().unwrap()])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        stdout.contains("lint-helper"),
+        "should find lint-helper: {stdout}"
+    );
+    assert!(
+        stdout.contains("test-runner"),
+        "should find test-runner: {stdout}"
+    );
+}
+
+// ── Suggest graph safety limits ─────────────────────────────────
+
+/// Suggest graph respects max_depth -- deeper chains are not followed.
+#[test]
+fn suggest_graph_max_depth_enforced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    // Config with max_depth = 1 (only follow immediate suggests, not transitive)
+    let config_dir = home.join(".config").join("skillet");
+    std::fs::create_dir_all(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join("config.toml"),
+        "[repos]\nlocal = []\nremote = []\n\n[cache]\nenabled = false\n\n[suggest]\nmax_depth = 1\n",
+    )
+    .unwrap();
+
+    // Chain: repo-a -> repo-b -> repo-c
+    let repo_c = make_git_repo(tmp.path(), "repo-c");
+    add_skill(&repo_c, "charlie", "c-skill", "Deep skill");
+    commit_all(&repo_c, "add skill");
+
+    let repo_b = make_git_repo(tmp.path(), "repo-b");
+    add_skill(&repo_b, "bob", "b-skill", "Middle skill");
+    write_skillet_toml(&repo_b, "repo-b", &[(file_url(&repo_c), None)]);
+    commit_all(&repo_b, "add skill and suggest");
+
+    let repo_a = make_git_repo(tmp.path(), "repo-a");
+    add_skill(&repo_a, "alice", "a-skill", "Direct skill");
+    write_skillet_toml(&repo_a, "repo-a", &[(file_url(&repo_b), None)]);
+    commit_all(&repo_a, "add skill and suggest");
+
+    let output = skillet()
+        .args(["search", "*", "--remote", &file_url(&repo_a)])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // repo-a (direct) and repo-b (depth 1) should be found
+    assert!(
+        stdout.contains("a-skill"),
+        "direct skill should appear: {stdout}"
+    );
+    assert!(
+        stdout.contains("b-skill"),
+        "depth-1 suggested skill should appear: {stdout}"
+    );
+    // repo-c (depth 2) should NOT be found with max_depth=1
+    assert!(
+        !stdout.contains("c-skill"),
+        "depth-2 skill should NOT appear with max_depth=1: {stdout}"
+    );
+}
+
+/// Suggest graph handles circular references without looping.
+#[test]
+fn suggest_graph_circular_reference() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    write_test_config(&home);
+
+    // Create repo-a and repo-b that suggest each other
+    let repo_a = make_git_repo(tmp.path(), "repo-a");
+    let repo_b = make_git_repo(tmp.path(), "repo-b");
+
+    add_skill(&repo_a, "alice", "a-skill", "Skill A");
+    // repo-a suggests repo-b
+    write_skillet_toml(&repo_a, "repo-a", &[(file_url(&repo_b), None)]);
+    commit_all(&repo_a, "add skill and suggest");
+
+    add_skill(&repo_b, "bob", "b-skill", "Skill B");
+    // repo-b suggests repo-a (circular!)
+    write_skillet_toml(&repo_b, "repo-b", &[(file_url(&repo_a), None)]);
+    commit_all(&repo_b, "add skill and suggest");
+
+    // Should complete without hanging, find both skills
+    let output = skillet()
+        .args(["search", "*", "--remote", &file_url(&repo_a)])
+        .env("HOME", &home)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "should not hang or fail");
+    assert!(stdout.contains("a-skill"), "should find a-skill: {stdout}");
+    assert!(stdout.contains("b-skill"), "should find b-skill: {stdout}");
+}
+
 // ── No-suggest flag ─────────────────────────────────────────────
 
 /// --no-suggest prevents following suggest entries.
