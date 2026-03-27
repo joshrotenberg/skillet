@@ -16,27 +16,74 @@ path = "skills"
 # Skillet follows these on startup to build a discovery graph.
 # Any repo can suggest others; use --no-suggest to opt out.
 
+# ── Official / vendor repos ─────────────────────────────────────────
+
+[[suggest]]
+url = "https://github.com/anthropics/skills.git"
+subdir = "skills"
+description = "Official Anthropic skills (docs, design, MCP, frontend)"
+
+[[suggest]]
+url = "https://github.com/vercel-labs/agent-skills.git"
+subdir = "skills"
+description = "Vercel React and Next.js skills"
+
+[[suggest]]
+url = "https://github.com/firebase/agent-skills.git"
+subdir = "skills"
+description = "Firebase agent skills"
+
+[[suggest]]
+url = "https://github.com/supabase/agent-skills.git"
+subdir = "skills"
+description = "Supabase and Postgres skills"
+
+[[suggest]]
+url = "https://github.com/google-gemini/gemini-skills.git"
+subdir = "skills"
+description = "Google Gemini API skills"
+
+[[suggest]]
+url = "https://github.com/redis/agent-skills.git"
+subdir = "skills"
+description = "Redis agent skills"
+
+[[suggest]]
+url = "https://github.com/callstackincubator/agent-skills.git"
+subdir = "skills"
+description = "Callstack React Native skills"
+
 [[suggest]]
 url = "https://github.com/microsoft/skills.git"
 subdir = ".github/plugins"
-description = "Microsoft Azure SDK and dev skills (170 skills)"
+description = "Microsoft Azure SDK and dev skills"
+
+[[suggest]]
+url = "https://github.com/kepano/obsidian-skills.git"
+subdir = "skills"
+description = "Obsidian note-taking and PKM skills"
+
+# ── Community collections ────────────────────────────────────────────
 
 [[suggest]]
 url = "https://github.com/TerminalSkills/skills.git"
 description = "Broad skill library covering 800+ tools and frameworks"
 
 [[suggest]]
-url = "https://github.com/firebase/skills.git"
-description = "Firebase agent skills"
+url = "https://github.com/softaworks/agent-toolkit.git"
+subdir = "skills"
+description = "General dev workflows, architecture, testing, security"
 
 [[suggest]]
-url = "https://github.com/redis/agent-skills.git"
-description = "Redis agent skills"
+url = "https://github.com/antfu/skills.git"
+subdir = "skills"
+description = "Anthony Fu's curated dev skills"
 
 [[suggest]]
-url = "https://github.com/callstackincubator/agent-skills.git"
-description = "Callstack agent skills for React Native"
+url = "https://github.com/muratcankoylan/Agent-Skills-for-Context-Engineering.git"
+subdir = "skills"
+description = "Context engineering and multi-agent pattern skills"
 
 [[suggest]]
-url = "https://github.com/softaworks/agent-skills.git"
-description = "Softaworks agent skills"
+url = "https://github.com/daymade/claude-code-skills.git"
+description = "Claude Code productivity skills (research, i18n, CLI)"
