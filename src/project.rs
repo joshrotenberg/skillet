@@ -257,79 +257,114 @@ pub struct Frontmatter {
 
 /// Parse YAML frontmatter from SKILL.md content.
 ///
-/// Handles the simple key-value format used in npm skill repos:
+/// Handles the full YAML format including multiline scalars (`>-`, `|`),
+/// nested metadata, and list-style tags:
 /// ```text
 /// ---
 /// name: my-skill
-/// description: A helpful skill
+/// description: >-
+///   A helpful skill that does many things
+///   across multiple lines.
 /// version: 1.0.0
-/// tags: [caching, redis]
+/// metadata:
+///   tags:
+///     - caching
+///     - redis
 /// ---
 /// ```
 ///
 /// Returns `None` if the content doesn't start with `---` frontmatter.
-/// This is a simple line-by-line parser (no YAML dependency) matching
-/// the existing pattern in `validate.rs`.
 pub fn parse_frontmatter(skill_md: &str) -> Option<Frontmatter> {
-    let mut lines = skill_md.lines();
-
-    // First line must be "---"
-    if lines.next()?.trim() != "---" {
+    let trimmed = skill_md.trim_start();
+    if !trimmed.starts_with("---") {
         return None;
     }
 
+    // Find the closing ---
+    let after_open = &trimmed[3..];
+    let rest = after_open.trim_start_matches(['\r', '\n']);
+    let end = rest.find("\n---")?;
+    let yaml_str = &rest[..end];
+
+    // Parse with serde_yaml into a generic Value for flexible extraction
+    let yaml: serde_yaml::Value = serde_yaml::from_str(yaml_str).ok()?;
+    let map = yaml.as_mapping()?;
+
     let mut fm = Frontmatter::default();
 
-    for line in lines {
-        let trimmed = line.trim();
-        if trimmed == "---" {
-            // End of frontmatter
-            return Some(fm);
-        }
-
-        // Skip empty lines and comments inside frontmatter
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        // Parse "key: value" pairs
-        let Some((key, value)) = trimmed.split_once(':') else {
-            continue;
+    // Extract top-level fields
+    if let Some(v) = map.get("name").and_then(|v| v.as_str()) {
+        fm.name = Some(v.to_string());
+    }
+    if let Some(v) = map.get("description").and_then(|v| v.as_str()) {
+        fm.description = Some(v.trim().to_string());
+    }
+    if let Some(v) = map.get("version") {
+        // Version can be a string or number in YAML
+        let version_str = match v {
+            serde_yaml::Value::String(s) => Some(s.clone()),
+            serde_yaml::Value::Number(n) => Some(n.to_string()),
+            _ => None,
         };
+        fm.version = version_str;
+    }
+    if let Some(v) = map.get("license").and_then(|v| v.as_str()) {
+        fm.license = Some(v.to_string());
+    }
 
-        let key = key.trim();
-        let value = value.trim();
-        // Strip optional surrounding quotes
-        let value = value
-            .strip_prefix('"')
-            .and_then(|v| v.strip_suffix('"'))
-            .or_else(|| value.strip_prefix('\'').and_then(|v| v.strip_suffix('\'')))
-            .unwrap_or(value);
-
-        match key {
-            "name" => fm.name = Some(value.to_string()),
-            "description" => fm.description = Some(value.to_string()),
-            "version" => fm.version = Some(value.to_string()),
-            "license" => fm.license = Some(value.to_string()),
-            "author" => fm.author = Some(value.to_string()),
-            "tags" => {
-                // Parse inline array: [tag1, tag2] or comma-separated
-                let inner = value
-                    .strip_prefix('[')
-                    .and_then(|v| v.strip_suffix(']'))
-                    .unwrap_or(value);
-                fm.tags = inner
-                    .split(',')
-                    .map(|t| t.trim().trim_matches('"').trim_matches('\'').to_string())
-                    .filter(|t| !t.is_empty())
-                    .collect();
-            }
-            _ => {} // Ignore unknown keys (metadata.*, etc.)
+    // Author: top-level or nested in metadata
+    if let Some(v) = map.get("author").and_then(|v| v.as_str()) {
+        fm.author = Some(v.to_string());
+    } else if let Some(meta) = map.get("metadata").and_then(|v| v.as_mapping()) {
+        if let Some(v) = meta.get("author").and_then(|v| v.as_str()) {
+            fm.author = Some(v.to_string());
+        }
+        // Also check for version in metadata (TerminalSkills pattern)
+        if fm.version.is_none()
+            && let Some(v) = meta.get("version")
+        {
+            fm.version = match v {
+                serde_yaml::Value::String(s) => Some(s.clone()),
+                serde_yaml::Value::Number(n) => Some(n.to_string()),
+                _ => None,
+            };
         }
     }
 
-    // Reached end of file without closing "---"
-    None
+    // Tags: top-level, or nested in metadata
+    fm.tags = extract_tags(map.get("tags"))
+        .or_else(|| {
+            map.get("metadata")
+                .and_then(|m| m.as_mapping())
+                .and_then(|m| extract_tags(m.get("tags")))
+        })
+        .unwrap_or_default();
+
+    Some(fm)
+}
+
+/// Extract tags from a YAML value (handles both inline arrays and list-style).
+fn extract_tags(value: Option<&serde_yaml::Value>) -> Option<Vec<String>> {
+    let v = value?;
+    match v {
+        serde_yaml::Value::Sequence(seq) => {
+            let tags: Vec<String> = seq
+                .iter()
+                .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                .collect();
+            if tags.is_empty() { None } else { Some(tags) }
+        }
+        serde_yaml::Value::String(s) => {
+            // Comma-separated string
+            let tags: Vec<String> = s
+                .split(',')
+                .map(|t| t.trim().to_string())
+                .filter(|t| !t.is_empty())
+                .collect();
+            if tags.is_empty() { None } else { Some(tags) }
+        }
+        _ => None,
+    }
 }
 
 /// Infer skill metadata from directory context when `skill.toml` is absent.
