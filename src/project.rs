@@ -1485,4 +1485,146 @@ url = "https://github.com/owner/repo-c.git"
             vec!["manifest-tag"]
         );
     }
+
+    // ── Gap #2: Multiline YAML frontmatter ──────────────────────────
+
+    #[test]
+    fn test_parse_frontmatter_folded_scalar() {
+        let md = "---\nname: my-skill\ndescription: >-\n  A helpful skill that does\n  many things across lines.\nversion: 1.0.0\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse folded scalar");
+        assert_eq!(
+            fm.description.as_deref(),
+            Some("A helpful skill that does many things across lines.")
+        );
+    }
+
+    #[test]
+    fn test_parse_frontmatter_literal_scalar() {
+        let md = "---\nname: my-skill\ndescription: |\n  Line one.\n  Line two.\nversion: 2.0.0\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse literal scalar");
+        let desc = fm.description.unwrap();
+        assert!(desc.contains("Line one."), "should contain Line one");
+        assert!(desc.contains("Line two."), "should contain Line two");
+    }
+
+    // ── Gap #3: Frontmatter categories and trigger ──────────────────
+
+    #[test]
+    fn test_parse_frontmatter_trigger() {
+        let md = "---\nname: my-skill\ntrigger: Use when writing Rust code\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse trigger");
+        assert_eq!(fm.trigger.as_deref(), Some("Use when writing Rust code"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_categories_list() {
+        let md = "---\nname: my-skill\ncategories:\n  - development\n  - rust\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse categories");
+        assert_eq!(fm.categories, vec!["development", "rust"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_categories_inline() {
+        let md = "---\nname: my-skill\ncategories: [tools, config]\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse inline categories");
+        assert_eq!(fm.categories, vec!["tools", "config"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_comma_separated_tags() {
+        let md = "---\nname: my-skill\ntags: \"caching, redis, performance\"\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse comma-separated tags");
+        assert_eq!(fm.tags, vec!["caching", "redis", "performance"]);
+    }
+
+    #[test]
+    fn test_infer_metadata_trigger_from_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let skill_md = "---\ntrigger: Use when debugging\n---\n\n# Debug Skill\n\nHelps debug.\n";
+        let metadata = infer_metadata(&skill_dir, skill_md, None);
+
+        assert_eq!(
+            metadata.skill.trigger.as_deref(),
+            Some("Use when debugging")
+        );
+    }
+
+    #[test]
+    fn test_infer_metadata_categories_from_frontmatter() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let skill_md = "---\ncategories:\n  - security\n  - review\ntags:\n  - owasp\n---\n\n# Audit\n\nAudit things.\n";
+        let metadata = infer_metadata(&skill_dir, skill_md, None);
+
+        let cls = metadata.skill.classification.as_ref().unwrap();
+        assert_eq!(cls.categories, vec!["security", "review"]);
+        assert_eq!(cls.tags, vec!["owasp"]);
+    }
+
+    #[test]
+    fn test_infer_metadata_frontmatter_categories_fill_empty_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let skill_dir = tmp.path().join("my-skill");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        let manifest = SkilletToml {
+            project: Some(ProjectSection {
+                // Manifest has empty categories
+                categories: vec![],
+                tags: vec![],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+
+        let skill_md = "---\ncategories:\n  - tools\ntags:\n  - mcp\n---\n\n# Skill\n\nContent.\n";
+        let metadata = infer_metadata(&skill_dir, skill_md, Some(&manifest));
+
+        let cls = metadata.skill.classification.as_ref().unwrap();
+        assert_eq!(cls.categories, vec!["tools"]);
+        assert_eq!(cls.tags, vec!["mcp"]);
+    }
+
+    // ── Gap #4: Nested metadata pattern ─────────────────────────────
+
+    #[test]
+    fn test_parse_frontmatter_nested_metadata_tags() {
+        let md = "---\nname: my-skill\nmetadata:\n  tags:\n    - caching\n    - redis\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse nested tags");
+        assert_eq!(fm.tags, vec!["caching", "redis"]);
+    }
+
+    #[test]
+    fn test_parse_frontmatter_nested_metadata_author() {
+        let md = "---\nname: my-skill\nmetadata:\n  author: Alice\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse nested author");
+        assert_eq!(fm.author.as_deref(), Some("Alice"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_nested_metadata_version() {
+        let md = "---\nname: my-skill\nmetadata:\n  version: 5.0.0\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse nested version");
+        assert_eq!(fm.version.as_deref(), Some("5.0.0"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_top_level_overrides_nested() {
+        let md = "---\nname: my-skill\nauthor: Top-level\nmetadata:\n  author: Nested\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse");
+        // Top-level author wins over nested
+        assert_eq!(fm.author.as_deref(), Some("Top-level"));
+    }
+
+    #[test]
+    fn test_parse_frontmatter_nested_categories() {
+        let md = "---\nname: my-skill\nmetadata:\n  categories:\n    - devops\n    - ci-cd\n---\n\n# Content\n";
+        let fm = parse_frontmatter(md).expect("should parse nested categories");
+        assert_eq!(fm.categories, vec!["devops", "ci-cd"]);
+    }
 }

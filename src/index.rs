@@ -1419,4 +1419,231 @@ path = "skills"
             "owner should come from git remote of parent repo"
         );
     }
+
+    // ── Gap #1: Frontmatter + skill.toml merge ──────────────────────
+
+    #[test]
+    fn test_frontmatter_primary_over_skill_toml() {
+        // When both frontmatter and skill.toml exist, frontmatter wins
+        // for fields it provides; skill.toml fills gaps.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        // Create owner/skill directory structure
+        let skill_dir = root.join("testowner/merge-test");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        // skill.toml with trigger, license, compatibility (fields frontmatter lacks)
+        std::fs::write(
+            skill_dir.join("skill.toml"),
+            r#"[skill]
+name = "merge-test"
+owner = "testowner"
+version = "1.0.0"
+description = "From skill.toml"
+trigger = "Use when testing merge behavior"
+license = "Apache-2.0"
+
+[skill.classification]
+categories = ["testing"]
+tags = ["toml-tag"]
+
+[skill.compatibility]
+requires_tool_use = true
+"#,
+        )
+        .unwrap();
+
+        // SKILL.md with frontmatter that overrides description, version, tags
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: merge-test
+description: From frontmatter
+version: 2.0.0
+tags:
+  - fm-tag
+---
+
+# Merge Test Skill
+
+Content here.
+"#,
+        )
+        .unwrap();
+
+        let index = load_index(root).expect("should load index");
+        let entry = index
+            .skills
+            .get(&("testowner".to_string(), "merge-test".to_string()))
+            .expect("merge-test should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        let info = &latest.metadata.skill;
+
+        // Frontmatter wins for fields it provides
+        assert_eq!(
+            info.description, "From frontmatter",
+            "frontmatter description should win"
+        );
+        assert_eq!(info.version, "2.0.0", "frontmatter version should win");
+
+        // skill.toml fills gaps for fields frontmatter doesn't have
+        assert_eq!(
+            info.trigger.as_deref(),
+            Some("Use when testing merge behavior"),
+            "trigger should come from skill.toml"
+        );
+        assert_eq!(
+            info.license.as_deref(),
+            Some("Apache-2.0"),
+            "license should come from skill.toml"
+        );
+        assert!(
+            info.compatibility.is_some(),
+            "compatibility should come from skill.toml"
+        );
+
+        // Tags: frontmatter wins
+        let cls = info
+            .classification
+            .as_ref()
+            .expect("should have classification");
+        assert_eq!(cls.tags, vec!["fm-tag"], "frontmatter tags should win");
+        // Categories: frontmatter has none, so skill.toml fills the gap
+        assert_eq!(
+            cls.categories,
+            vec!["testing"],
+            "categories should come from skill.toml"
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_only_skill_loads() {
+        // A skill with only SKILL.md frontmatter (no skill.toml) should load fine
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let skill_dir = root.join("testowner/fm-only");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            r#"---
+name: fm-only
+description: A frontmatter-only skill
+version: 1.0.0
+trigger: Use for testing
+license: MIT
+author: Test Author
+categories:
+  - development
+tags:
+  - testing
+---
+
+# Frontmatter Only
+
+No skill.toml needed.
+"#,
+        )
+        .unwrap();
+
+        let index = load_index(root).expect("should load index");
+        let entry = index
+            .skills
+            .get(&("testowner".to_string(), "fm-only".to_string()))
+            .expect("fm-only should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        let info = &latest.metadata.skill;
+
+        assert_eq!(info.description, "A frontmatter-only skill");
+        assert_eq!(info.version, "1.0.0");
+        assert_eq!(info.trigger.as_deref(), Some("Use for testing"));
+        assert_eq!(info.license.as_deref(), Some("MIT"));
+        let cls = info.classification.as_ref().unwrap();
+        assert_eq!(cls.categories, vec!["development"]);
+        assert_eq!(cls.tags, vec!["testing"]);
+    }
+
+    #[test]
+    fn test_skill_toml_only_still_works() {
+        // Backward compat: skill.toml without frontmatter should still load
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+
+        let skill_dir = root.join("testowner/toml-only");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+
+        std::fs::write(
+            skill_dir.join("skill.toml"),
+            r#"[skill]
+name = "toml-only"
+owner = "testowner"
+version = "1.0.0"
+description = "A skill.toml-only skill"
+trigger = "Use for backward compat testing"
+
+[skill.classification]
+categories = ["legacy"]
+tags = ["toml"]
+"#,
+        )
+        .unwrap();
+
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "# Toml Only\n\nNo frontmatter, just content.\n",
+        )
+        .unwrap();
+
+        let index = load_index(root).expect("should load index");
+        let entry = index
+            .skills
+            .get(&("testowner".to_string(), "toml-only".to_string()))
+            .expect("toml-only should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        let info = &latest.metadata.skill;
+
+        assert_eq!(info.description, "A skill.toml-only skill");
+        assert_eq!(
+            info.trigger.as_deref(),
+            Some("Use for backward compat testing")
+        );
+    }
+
+    #[test]
+    fn test_frontmatter_primary_in_standard_repo() {
+        // Verify the standard test repo's frontmatter-only skills load correctly
+        let test_dir = test_repo();
+        let index = load_index(test_dir).expect("Failed to load test index");
+
+        // code-review is frontmatter-only (no skill.toml in fixture)
+        let entry = index
+            .skills
+            .get(&("joshrotenberg".to_string(), "code-review".to_string()))
+            .expect("code-review should exist");
+
+        let latest = entry.latest().expect("should have latest");
+        let info = &latest.metadata.skill;
+
+        assert_eq!(
+            info.trigger.as_deref(),
+            Some("Use when reviewing code changes, PRs, or diffs"),
+            "trigger should come from frontmatter"
+        );
+        assert_eq!(info.license.as_deref(), Some("MIT"));
+
+        let cls = info
+            .classification
+            .as_ref()
+            .expect("should have classification");
+        assert_eq!(cls.categories, vec!["development", "review"]);
+        assert_eq!(
+            cls.tags,
+            vec!["code-review", "pr", "quality", "best-practices"]
+        );
+    }
 }
