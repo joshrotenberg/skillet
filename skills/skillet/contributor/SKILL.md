@@ -1,6 +1,19 @@
 ---
 name: contributor
 description: Contributing to skillet itself. Covers architecture, development setup, testing, and PR workflow.
+version: 2026.02.27
+trigger: Use when the user wants to contribute to skillet, understand its architecture, or run its test suite
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - development
+  - tools
+tags:
+  - skillet
+  - contributing
+  - rust
+  - architecture
+  - testing
 ---
 
 ## Contributing to Skillet
@@ -17,7 +30,7 @@ src/
   main.rs        # CLI (clap), MCP server setup
   lib.rs         # Library root, re-exports
   state.rs       # AppState, SkillIndex, SkillEntry, SkillVersion, SkillMetadata
-  index.rs       # Directory walking, skill.toml/SKILL.md parsing, config loading
+  index.rs       # Directory walking, SKILL.md/frontmatter parsing, config loading
   search.rs      # SkillSearch: BM25 full-text search over skill metadata
   bm25.rs        # Vendored BM25 engine
   cache.rs       # Persistent disk cache for SkillIndex
@@ -107,6 +120,6 @@ Branch naming conventions:
 
 - **Tool-first**: skillet is the tool, repos are data
 - **Zero-config-first**: only SKILL.md is truly required
+- **Frontmatter-primary**: metadata lives in SKILL.md YAML frontmatter
 - **Owner/name namespacing**: `owner/skill-name` directories
-- **Separate metadata from prompt**: skill.toml + SKILL.md
 - **Git-backed**: repos are git repos, auditable by default

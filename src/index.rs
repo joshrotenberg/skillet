@@ -1,10 +1,12 @@
 //! Index loading from a local repo directory
 //!
 //! Walks the repo directory tree looking for skill directories containing
-//! `skill.toml`. Supports both flat (`owner/skill-name/`) and nested
+//! `SKILL.md`. Supports both flat (`owner/skill-name/`) and nested
 //! (`owner/group/subgroup/skill-name/`) layouts. Intermediate directories
-//! without `skill.toml` are recursed into up to `MAX_NESTING_DEPTH` levels
+//! without `SKILL.md` are recursed into up to `MAX_NESTING_DEPTH` levels
 //! below the owner.
+//!
+//! Metadata precedence: SKILL.md frontmatter > skill.toml > directory inference.
 
 use std::path::{Path, PathBuf};
 
@@ -399,8 +401,60 @@ fn load_skill(owner: &str, name: &str, dir: &Path) -> crate::error::Result<Skill
         });
     };
 
-    // Parse metadata from skill.toml or infer from directory/SKILL.md
-    let (metadata, skill_toml_raw) = if has_skill_toml {
+    // Parse metadata: frontmatter is primary, skill.toml is fallback.
+    // When both exist, frontmatter fields win; skill.toml fills gaps.
+    let has_frontmatter = project::parse_frontmatter(&skill_md).is_some();
+
+    let (metadata, skill_toml_raw) = if has_frontmatter {
+        let mut meta = project::infer_metadata(dir, &skill_md, None);
+        // Override owner/name from directory structure (authoritative)
+        meta.skill.owner = owner.to_string();
+        meta.skill.name = name.to_string();
+
+        let raw = if has_skill_toml {
+            let raw = std::fs::read_to_string(&skill_toml_path).map_err(|e| Error::FileRead {
+                path: skill_toml_path.clone(),
+                source: e,
+            })?;
+            let toml_meta: SkillMetadata = toml::from_str(&raw).map_err(|e| Error::TomlParse {
+                path: skill_toml_path.clone(),
+                source: e,
+            })?;
+
+            // Fill gaps from skill.toml where frontmatter is silent
+            if meta.skill.trigger.is_none() {
+                meta.skill.trigger = toml_meta.skill.trigger;
+            }
+            if meta.skill.license.is_none() {
+                meta.skill.license = toml_meta.skill.license;
+            }
+            if meta.skill.author.is_none() {
+                meta.skill.author = toml_meta.skill.author;
+            }
+            if meta.skill.compatibility.is_none() {
+                meta.skill.compatibility = toml_meta.skill.compatibility;
+            }
+            if meta.skill.classification.is_none() {
+                meta.skill.classification = toml_meta.skill.classification.clone();
+            } else if let Some(ref mut cls) = meta.skill.classification {
+                // Merge: fill empty categories/tags from skill.toml
+                if let Some(ref toml_cls) = toml_meta.skill.classification {
+                    if cls.categories.is_empty() {
+                        cls.categories = toml_cls.categories.clone();
+                    }
+                    if cls.tags.is_empty() {
+                        cls.tags = toml_cls.tags.clone();
+                    }
+                }
+            }
+
+            raw
+        } else {
+            String::new()
+        };
+
+        (meta, raw)
+    } else if has_skill_toml {
         let raw = std::fs::read_to_string(&skill_toml_path).map_err(|e| Error::FileRead {
             path: skill_toml_path.clone(),
             source: e,
@@ -491,13 +545,15 @@ fn load_versions_manifest(
         });
     }
 
-    // The last entry's version must match skill.toml's version
+    // The last entry's version must match the metadata version, unless the
+    // metadata version was inferred (default "0.1.0") -- in that case, adopt
+    // the versions.toml version as authoritative.
     let last = manifest.versions.last().unwrap();
-    if last.version != current_metadata.skill.version {
+    if last.version != current_metadata.skill.version && current_metadata.skill.version != "0.1.0" {
         return Err(Error::SkillLoad {
             path: path.to_path_buf(),
             reason: format!(
-                "Version mismatch: last entry in versions.toml is '{}' but skill.toml says '{}'",
+                "Version mismatch: last entry in versions.toml is '{}' but metadata says '{}'",
                 last.version, current_metadata.skill.version
             ),
         });
@@ -509,10 +565,7 @@ fn load_versions_manifest(
     let toml_path = skill_dir.join("skill.toml");
     let md_path = skill_dir.join("SKILL.md");
 
-    let skill_toml_raw = std::fs::read_to_string(&toml_path).map_err(|e| Error::FileRead {
-        path: toml_path.clone(),
-        source: e,
-    })?;
+    let skill_toml_raw = std::fs::read_to_string(&toml_path).unwrap_or_default();
     let skill_md = std::fs::read_to_string(&md_path).map_err(|e| Error::FileRead {
         path: md_path.clone(),
         source: e,
@@ -526,9 +579,13 @@ fn load_versions_manifest(
         let is_last = i == total - 1;
 
         if is_last {
+            // Update metadata version to match versions.toml when it was
+            // inferred from frontmatter (which may not have a version field)
+            let mut last_metadata = current_metadata.clone();
+            last_metadata.skill.version = record.version.clone();
             versions.push(SkillVersion {
                 version: record.version,
-                metadata: current_metadata.clone(),
+                metadata: last_metadata,
                 skill_md: skill_md.clone(),
                 skill_toml_raw: skill_toml_raw.clone(),
                 yanked: record.yanked,

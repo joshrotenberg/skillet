@@ -252,7 +252,9 @@ pub struct Frontmatter {
     pub version: Option<String>,
     pub license: Option<String>,
     pub author: Option<String>,
+    pub trigger: Option<String>,
     pub tags: Vec<String>,
+    pub categories: Vec<String>,
 }
 
 /// Parse YAML frontmatter from SKILL.md content.
@@ -331,12 +333,26 @@ pub fn parse_frontmatter(skill_md: &str) -> Option<Frontmatter> {
         }
     }
 
+    // Trigger: top-level
+    if let Some(v) = map.get("trigger").and_then(|v| v.as_str()) {
+        fm.trigger = Some(v.trim().to_string());
+    }
+
     // Tags: top-level, or nested in metadata
-    fm.tags = extract_tags(map.get("tags"))
+    fm.tags = extract_string_list(map.get("tags"))
         .or_else(|| {
             map.get("metadata")
                 .and_then(|m| m.as_mapping())
-                .and_then(|m| extract_tags(m.get("tags")))
+                .and_then(|m| extract_string_list(m.get("tags")))
+        })
+        .unwrap_or_default();
+
+    // Categories: top-level, or nested in metadata
+    fm.categories = extract_string_list(map.get("categories"))
+        .or_else(|| {
+            map.get("metadata")
+                .and_then(|m| m.as_mapping())
+                .and_then(|m| extract_string_list(m.get("categories")))
         })
         .unwrap_or_default();
 
@@ -344,7 +360,7 @@ pub fn parse_frontmatter(skill_md: &str) -> Option<Frontmatter> {
 }
 
 /// Extract tags from a YAML value (handles both inline arrays and list-style).
-fn extract_tags(value: Option<&serde_yaml::Value>) -> Option<Vec<String>> {
+fn extract_string_list(value: Option<&serde_yaml::Value>) -> Option<Vec<String>> {
     let v = value?;
     match v {
         serde_yaml::Value::Sequence(seq) => {
@@ -412,6 +428,8 @@ pub fn infer_metadata(
         })
     });
 
+    let trigger = frontmatter.as_ref().and_then(|fm| fm.trigger.clone());
+
     let (categories, tags) = if let Some(m) = manifest {
         let cats = m
             .project
@@ -423,7 +441,15 @@ pub fn infer_metadata(
             .as_ref()
             .map(|p| p.tags.clone())
             .unwrap_or_default();
-        // Merge frontmatter tags if manifest has none
+        // Prefer frontmatter categories/tags over manifest when available
+        let cats = if cats.is_empty() {
+            frontmatter
+                .as_ref()
+                .map(|fm| fm.categories.clone())
+                .unwrap_or_default()
+        } else {
+            cats
+        };
         if tags.is_empty()
             && let Some(ref fm) = frontmatter
         {
@@ -435,7 +461,11 @@ pub fn infer_metadata(
             .as_ref()
             .map(|fm| fm.tags.clone())
             .unwrap_or_default();
-        (Vec::new(), tags)
+        let cats = frontmatter
+            .as_ref()
+            .map(|fm| fm.categories.clone())
+            .unwrap_or_default();
+        (cats, tags)
     };
 
     let classification = if !categories.is_empty() || !tags.is_empty() {
@@ -450,7 +480,7 @@ pub fn infer_metadata(
             owner,
             version,
             description,
-            trigger: None,
+            trigger,
             license,
             author,
             classification,

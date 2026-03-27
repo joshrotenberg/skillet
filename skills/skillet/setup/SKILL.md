@@ -1,6 +1,18 @@
 ---
 name: setup
 description: Set up and configure Skillet skill discovery. Use when the user wants to set up skillet, configure repos, or customize server behavior.
+version: 2026.02.27
+trigger: Use when the user wants to set up skillet, configure skill discovery, or manage skill installation preferences
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - tools
+  - configuration
+tags:
+  - skillet
+  - skills
+  - setup
+  - mcp
 ---
 
 ## Skillet Setup

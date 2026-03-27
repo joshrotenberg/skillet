@@ -1,6 +1,18 @@
 ---
 name: skill-repos
 description: Curated directory of external skill repositories. Use when the user needs skills not available locally, or to suggest adding new skill sources.
+version: 2026.02.27
+trigger: Use when the user needs skills skillet doesn't have locally, or when you want to suggest adding external skill sources
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - tools
+  - skills
+tags:
+  - skillet
+  - skills
+  - discovery
+  - agent-skills
 ---
 
 ## External Skill Repositories

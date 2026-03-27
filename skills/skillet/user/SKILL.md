@@ -1,6 +1,19 @@
 ---
 name: user
 description: Using skillet as a skill consumer. Covers searching, browsing, and using skills as MCP prompts.
+version: 2026.02.27
+trigger: Use when the user wants to search for skills, install skills, configure skillet, or manage their skill library
+license: MIT OR Apache-2.0
+author: Josh Rotenberg
+categories:
+  - tools
+  - configuration
+tags:
+  - skillet
+  - skills
+  - mcp
+  - install
+  - search
 ---
 
 ## Skillet User Guide
