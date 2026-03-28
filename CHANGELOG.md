@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-03-28
+
+### Bug Fixes
+
+- Parse YAML frontmatter properly (multiline scalars, nested metadata) ([#216](https://github.com/joshrotenberg/skillet/pull/216))
+
+### Documentation
+
+- Update README to reflect frontmatter-primary model and expanded repos ([#223](https://github.com/joshrotenberg/skillet/pull/223))
+
+### Features
+
+- Expand default suggest repos for day-1 coverage ([#219](https://github.com/joshrotenberg/skillet/pull/219))
+
+### Refactor
+
+- Make SKILL.md frontmatter the primary metadata source (#215 phase 2) ([#218](https://github.com/joshrotenberg/skillet/pull/218))
+
+### Testing
+
+- Add coverage for frontmatter-primary metadata parsing ([#221](https://github.com/joshrotenberg/skillet/pull/221))
+- Add integration coverage for MCP tools, auto-detect, and suggest limits ([#222](https://github.com/joshrotenberg/skillet/pull/222))
+
+
+
 ## [0.5.1] - 2026-03-18
 
 ### Features
